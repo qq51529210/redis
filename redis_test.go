@@ -66,6 +66,36 @@ func Test_Redis(t *testing.T) {
 	if st != DataTypeNil {
 		t.FailNow()
 	}
+
+	// 判断
+	r.Cmd(m1.Reset().Write("exists", "key"), m2)
+	s, st = m2.Read()
+	t.Log(s, st)
+	// 结果是整数
+	if st != DataTypeInteger {
+		t.FailNow()
+	}
+	// 0和1，字符串
+	if s != "0" {
+		t.FailNow()
+	}
+
+	// 结果是数组
+	r.Cmd(m1.Reset().Write("keys", "*"), m2)
+	s, st = m2.Read()
+	t.Log(s, st)
+	// 第一个是数组，和它的长度
+	if st != DataTypeArray {
+		t.FailNow()
+	}
+	// 接下来是这个数组里边的元素，有可能还是数组
+	for {
+		s, st = m2.Read()
+		t.Log(s, st)
+		if st == DataTypeNil {
+			break
+		}
+	}
 }
 
 func BenchmarkSet(b *testing.B) {
@@ -84,10 +114,10 @@ func BenchmarkGet(b *testing.B) {
 	r := New(nil, nil)
 	defer r.Close()
 	m1, m2 := GetRequest(), GetResponse()
-	r.Cmd(m1.Reset().Write("set", "test", "test"), m2)
+	r.Cmd(m1.Reset().String("set").String("test").String("test"), m2)
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		r.Cmd(m1.Reset().Write("get", "test"), m2)
+		r.Cmd(m1.Reset().String("get").String("test"), m2)
 	}
 }

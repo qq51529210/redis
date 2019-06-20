@@ -16,7 +16,7 @@ func (this DataType) String() string {
 	case DataTypeError:
 		return "error"
 	case DataTypeInteger:
-		return "length"
+		return "integer"
 	case DataTypeString:
 		return "string"
 	case DataTypeArray:
@@ -233,6 +233,7 @@ func (this *Request) simpleStrings(c byte, s string) {
 type Response struct {
 	b []byte // 数据缓存
 	i []int  // 下一行的起始索引
+	n int    //
 }
 
 // 重置缓存
@@ -240,6 +241,7 @@ func (this *Response) reset() {
 	this.b = this.b[:0]
 	this.i = this.i[:0]
 	this.i = append(this.i, 0)
+	this.n = 0
 }
 
 // 返回下一个值(字符串表示)，和值的类型
