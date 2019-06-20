@@ -233,7 +233,7 @@ func (this *Request) simpleStrings(c byte, s string) {
 type Response struct {
 	b []byte // 数据缓存
 	i []int  // 下一行的起始索引
-	n int    //
+	n int    // 为了i不重新分配内存
 }
 
 // 重置缓存
@@ -246,13 +246,12 @@ func (this *Response) reset() {
 
 // 返回下一个值(字符串表示)，和值的类型
 func (this *Response) Read() (string, DataType) {
-	// 没有结果集
-	if len(this.i) < 2 {
+	if this.n == len(this.i)-1 {
 		return "", DataTypeNil
 	}
-	i1 := this.i[0]
-	this.i = this.i[1:]
-	i2 := this.i[0]
+	i1 := this.i[this.n]
+	this.n++
+	i2 := this.i[this.n]
 	switch this.b[i1] {
 	case '+':
 		return string(this.b[i1+1:i2-2]), DataTypeResponse
@@ -262,12 +261,12 @@ func (this *Response) Read() (string, DataType) {
 		return string(this.b[i1+1:i2-2]), DataTypeInteger
 	case '$':
 		// 下一个
-		if len(this.i) < 2 {
+		if this.n == len(this.i)-1 {
 			return "", DataTypeNil
 		}
-		i1 = this.i[0]
-		this.i = this.i[1:]
-		i2 := this.i[0]
+		i1 := this.i[this.n]
+		this.n++
+		i2 := this.i[this.n]
 		return string(this.b[i1:i2-2]), DataTypeString
 	case '*':
 		return string(this.b[i1+1:i2-2]), DataTypeArray

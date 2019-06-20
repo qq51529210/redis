@@ -1,7 +1,6 @@
 package redis
 
 import (
-	"container/list"
 	"errors"
 	"net"
 	"sync"
@@ -25,8 +24,8 @@ type dialContext struct {
 // 表示一个redis连接池对象
 type Redis struct {
 	mtx      sync.Mutex // 同步锁
-	freeConn list.List  // 可用的连接
-	allConn  list.List  // 所有的连接
+	freeConn []*conn    // 可用的连接
+	allConn  []*conn    // 所有的连接
 	maxConn  int        // 连接池的容量
 	closed   bool       // 是否关闭
 	host     string     // redis服务的地址
@@ -47,9 +46,8 @@ func (this *Redis) Close() error {
 	this.closed = true
 	this.mtx.Unlock()
 	// 关闭所有连接
-	for ele := this.allConn.Front(); ele != nil; ele = ele.Next() {
-		c := ele.Value.(*conn)
-		c.Close()
+	for i := 0; i < len(this.allConn); i++ {
+		this.allConn[i].Close()
 	}
 	return nil
 }
@@ -96,20 +94,22 @@ func (this *Redis) getConn() (*conn, error) {
 		return nil, errClosed
 	}
 	// 是否有可用的连接
-	if this.freeConn.Len() > 0 {
-		c := this.freeConn.Back().Value.(*conn)
+	n := len(this.freeConn) - 1
+	if n >= 0 {
+		c := this.freeConn[n]
+		this.freeConn = this.freeConn[:n]
 		this.mtx.Unlock()
 		return c, nil
 	}
 	// 所有连接是否最大
-	if this.allConn.Len() >= this.maxConn {
+	if len(this.allConn) >= this.maxConn {
 		this.mtx.Unlock()
 		return nil, errMaxConn
 	}
 	// 新的连接
 	c := &conn{rbuf: make([]byte, this.rbuf)}
 	// 加入连接池
-	this.allConn.PushBack(c)
+	this.allConn = append(this.allConn, c)
 	this.mtx.Unlock()
 	return c, nil
 }
@@ -117,7 +117,7 @@ func (this *Redis) getConn() (*conn, error) {
 // 回收连接
 func (this *Redis) putConn(c *conn) {
 	this.mtx.Lock()
-	this.freeConn.PushBack(c)
+	this.freeConn = append(this.freeConn, c)
 	this.mtx.Unlock()
 }
 
