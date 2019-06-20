@@ -1,6 +1,6 @@
 # redis
-
-<p>使用方法</p>
+<h5>使用</h5>
+<p>
 <pre>
 
 func Test_Redis(t *testing.T) {
@@ -100,8 +100,10 @@ func Test_Redis(t *testing.T) {
 }
 
 </pre>
+</p>
 
-<p>下面是测试</p>
+<h5>测试</h5>
+<p>
 <pre>
 === RUN   Test_Redis
 --- PASS: Test_Redis (0.01s)
@@ -126,3 +128,4 @@ PASS
 ok      github.com/qq51529210/redis     2.532s
 
 </pre>
+</p>
