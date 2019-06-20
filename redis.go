@@ -1,9 +1,7 @@
 package redis
 
 import (
-	"bytes"
 	"errors"
-	"io"
 	"net"
 	"sync"
 	"time"
@@ -55,14 +53,17 @@ func (this *Redis) Close() error {
 // io读字节
 // io写字节
 // 错误
-func (this *Redis) Cmd(request, response *Message) (int, int, error) {
+func (this *Redis) Cmd(request *Request, response *Response) (int, int, error) {
 	// 获取连接
 	c, o := <-this.conn
 	if !o {
 		return 0, 0, errClosed
 	}
 	// 交互
-	rn, wn, e := c.Cmd(this.dial, request, response)
+	rn, wn, e := c.Cmd(this.dial, this.ioTO, request, response)
+	if nil != e {
+		c.valid = false
+	}
 	// 缓存连接
 	this.conn <- c
 	return rn, wn, e
@@ -117,6 +118,9 @@ func New(cfg *Config, dial DialFunc) (*Redis) {
 	if nil == db.dial {
 		db.dial = db.defaultDial
 	}
+	if nil == cfg {
+		cfg = new(Config)
+	}
 	// redis服务地址
 	db.host = judgeString(cfg.Host, "127.0.0.1:6379")
 	// 最大连接数
@@ -170,52 +174,4 @@ func parseInt(b []byte) (n int) {
 		}
 	}
 	return
-}
-
-func formatInt(b []byte, n int) int {
-	m := 0
-	for {
-		b[m] = byte('0' + n%10)
-		n /= 10
-		if n == 0 {
-			break
-		}
-		m++
-	}
-	i1, i2 := 0, m
-	c := byte(0)
-	for i1 < i2 {
-		c = b[i1]
-		b[i1] = b[i2]
-		b[i2] = c
-		i2--
-		i1++
-	}
-	return m + 1
-}
-
-func readLine(r io.Reader, b1 []byte, b2 *bytes.Buffer, m int) (rn int, e error) {
-	n, i := 0, 0
-	for {
-		n, e = r.Read(b1)
-		rn += n
-		if nil != e {
-			return rn, e
-		}
-		// 写到缓存
-		b2.Write(b1[:n])
-		// 扫描crlf
-		i = 1
-		for ; i < n; i++ {
-			if b1[i] == '\n' {
-				if b1[i-1] == '\r' {
-					m--
-					if m < 1 {
-						return rn, nil
-					}
-					i++
-				}
-			}
-		}
-	}
 }
