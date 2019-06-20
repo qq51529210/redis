@@ -12,7 +12,7 @@ func Test_Redis(t *testing.T) {
 	// 命令写在一起
 	r.Cmd(m1.Write("set", "a", "12345\r\n第三方速度"), m2)
 	s, st := m2.Read()
-	t.Logf("type:<%v> value:<%v>", st, s)
+	t.Logf("type:%v value:%v", st, s)
 	// 命令对的话，应该是收到ok
 	if s != "OK" {
 		t.FailNow()
@@ -24,7 +24,7 @@ func Test_Redis(t *testing.T) {
 	// 命令一个一个写
 	r.Cmd(m1.Reset().Write("get").Write("a"), m2)
 	s, st = m2.Read()
-	t.Logf("type:<%v> value:<%v>", st, s)
+	t.Logf("type:%v value:%v", st, s)
 	if s != "12345" {
 		t.FailNow()
 	}
@@ -36,11 +36,11 @@ func Test_Redis(t *testing.T) {
 	m1.Reset().Write("set", "b").Integer(321)
 	r.Cmd(m1, m2)
 	s, st = m2.Read()
-	t.Logf("type:<%v> value:<%v>", st, s)
+	t.Logf("type:%v value:%v", st, s)
 	// 所以获取到的也是字符串
 	r.Cmd(m1.Reset().String("get").String("b"), m2)
 	s, st = m2.Read()
-	t.Logf("type:<%v> value:<%v>", st, s)
+	t.Logf("type:%v value:%v", st, s)
 	if s != "321" {
 		t.FailNow()
 	}
@@ -52,7 +52,7 @@ func Test_Redis(t *testing.T) {
 	m1.Reset().Write("sett", "b").Integer(321)
 	r.Cmd(m1, m2)
 	s, st = m2.Read()
-	t.Logf("type:<%v> value:<%v>", st, s)
+	t.Logf("type:%v value:%v", st, s)
 	// 收到错误
 	if st != DataTypeError {
 		t.FailNow()
@@ -61,7 +61,7 @@ func Test_Redis(t *testing.T) {
 	// 请求一个不存在的
 	r.Cmd(m1.Reset().String("get").String("nil"), m2)
 	s, st = m2.Read()
-	t.Logf("type:<%v> value:<%v>", st, s)
+	t.Logf("type:%v value:%v", st, s)
 	// 结果是nil
 	if st != DataTypeNil {
 		t.FailNow()
@@ -70,7 +70,7 @@ func Test_Redis(t *testing.T) {
 	// 判断
 	r.Cmd(m1.Reset().Write("exists", "key"), m2)
 	s, st = m2.Read()
-	t.Logf("type:<%v> value:<%v>", st, s)
+	t.Logf("type:%v value:%v", st, s)
 	// 结果是整数
 	if st != DataTypeInteger {
 		t.FailNow()
@@ -83,7 +83,7 @@ func Test_Redis(t *testing.T) {
 	// 结果是数组
 	r.Cmd(m1.Reset().Write("keys", "*"), m2)
 	s, st = m2.Read()
-	t.Logf("type:<%v> value:<%v>", st, s)
+	t.Logf("type:%v value:%v", st, s)
 	// 第一个是数组，和它的长度
 	if st != DataTypeArray {
 		t.FailNow()
@@ -91,10 +91,10 @@ func Test_Redis(t *testing.T) {
 	// 接下来是这个数组里边的元素，有可能还是数组
 	for {
 		s, st = m2.Read()
-		t.Logf("type:<%v> value:<%v>", st, s)
 		if st == DataTypeNil {
 			break
 		}
+		t.Logf("type:%v value:%v", st, s)
 	}
 }
 
