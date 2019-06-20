@@ -1,6 +1,7 @@
 package redis
 
 import (
+	"container/list"
 	"errors"
 	"net"
 	"sync"
@@ -11,23 +12,33 @@ type DialFunc func() (net.Conn, error)
 
 var (
 	// 使用了一个关闭的连接池错误
-	errClosed = errors.New("use closed redis connection pool")
+	errClosed  = errors.New("use closed redis connection pool")
+	errMaxConn = errors.New("max connection")
 )
+
+type dialContext struct {
+	timeout time.Duration
+	retry   int
+	dial    DialFunc
+}
 
 // 表示一个redis连接池对象
 type Redis struct {
-	conn   chan *conn    // 连接池
-	dial   DialFunc      // 指定连接函数
-	closed bool          // 是否关闭
-	mtx    sync.Mutex    // 同步锁
-	host   string        // redis服务的地址
-	ioTO   time.Duration // io超时
+	mtx      sync.Mutex // 同步锁
+	freeConn list.List  // 可用的连接
+	allConn  list.List  // 所有的连接
+	maxConn  int        // 连接池的容量
+	closed   bool       // 是否关闭
+	host     string     // redis服务的地址
+	rbuf     int        // 连接的读缓存大小
+	dialContext         // dial参数
 }
 
 // 关闭连接池
 // 返回
 // 错误
 func (this *Redis) Close() error {
+	// 改变状态
 	this.mtx.Lock()
 	if this.closed {
 		this.mtx.Unlock()
@@ -35,12 +46,11 @@ func (this *Redis) Close() error {
 	}
 	this.closed = true
 	this.mtx.Unlock()
-
-	close(this.conn)
-	for c := range this.conn {
+	// 关闭所有连接
+	for ele := this.allConn.Front(); ele != nil; ele = ele.Next() {
+		c := ele.Value.(*conn)
 		c.Close()
 	}
-
 	return nil
 }
 
@@ -55,17 +65,17 @@ func (this *Redis) Close() error {
 // 错误
 func (this *Redis) Cmd(request *Request, response *Response) (int, int, error) {
 	// 获取连接
-	c, o := <-this.conn
-	if !o {
-		return 0, 0, errClosed
+	c, e := this.getConn()
+	if nil != e {
+		return 0, 0, e
 	}
 	// 交互
-	rn, wn, e := c.Cmd(this.dial, this.ioTO, request, response)
+	rn, wn, e := c.Cmd(&this.dialContext, request, response)
 	if nil != e {
 		c.valid = false
 	}
 	// 缓存连接
-	this.conn <- c
+	this.putConn(c)
 	return rn, wn, e
 }
 
@@ -74,35 +84,42 @@ func (this *Redis) Cmd(request *Request, response *Response) (int, int, error) {
 // 底层连接
 // 错误
 func (this *Redis) defaultDial() (net.Conn, error) {
-	return net.DialTimeout("tcp", this.host, this.ioTO)
+	return net.DialTimeout("tcp", this.host, this.dialContext.timeout)
 }
 
-//func (this *Redis) Set(key string, value ...interface{}) (int, int, error) {
-//	// 消息
-//	request := GetMessage()
-//	response := GetMessage()
-//	// 序列化请求
-//	rn, wn, e := this.Cmd(request, response)
-//	if nil != e {
-//		return rn, wn, e
-//	}
-//	// 判断返回是否ok
-//	return rn, wn, e
-//}
-//
-//func (this *Redis) Get(key string, value ...interface{}) (int, int, error) {
-//	// 消息
-//	request := GetMessage()
-//	response := GetMessage()
-//	// 序列化请求
-//	rn, wn, e := this.Cmd(request, response)
-//	if nil != e {
-//		return rn, wn, e
-//	}
-//	// 判断返回是否ok
-//	// 反序列化响应到value数组
-//	return rn, wn, e
-//}
+// 获取一个可用的连接
+func (this *Redis) getConn() (*conn, error) {
+	this.mtx.Lock()
+	// 是否关闭
+	if this.closed {
+		this.mtx.Unlock()
+		return nil, errClosed
+	}
+	// 是否有可用的连接
+	if this.freeConn.Len() > 0 {
+		c := this.freeConn.Back().Value.(*conn)
+		this.mtx.Unlock()
+		return c, nil
+	}
+	// 所有连接是否最大
+	if this.allConn.Len() >= this.maxConn {
+		this.mtx.Unlock()
+		return nil, errMaxConn
+	}
+	// 新的连接
+	c := &conn{rbuf: make([]byte, this.rbuf)}
+	// 加入连接池
+	this.allConn.PushBack(c)
+	this.mtx.Unlock()
+	return c, nil
+}
+
+// 回收连接
+func (this *Redis) putConn(c *conn) {
+	this.mtx.Lock()
+	this.freeConn.PushBack(c)
+	this.mtx.Unlock()
+}
 
 // 新建一个连接池
 // 如果指定了dial函数，cfg中创建连接的相关配置无效
@@ -124,21 +141,14 @@ func New(cfg *Config, dial DialFunc) (*Redis) {
 	// redis服务地址
 	db.host = judgeString(cfg.Host, "127.0.0.1:6379")
 	// 最大连接数
-	max_conn := judgeInt(cfg.MaxConn, 1, 64)
+	db.maxConn = judgeInt(cfg.MaxConn, 1, 64)
 	// io超时
-	db.ioTO = time.Duration(judgeInt(cfg.IOTimeout, 1, 3)) * time.Second
+	db.dialContext.timeout = time.Duration(judgeInt(cfg.IOTimeout, 1, 3)) * time.Second
 	// 失败重连
-	re_try := judgeInt(cfg.RetryConn, 1, 1)
+	db.dialContext.retry = judgeInt(cfg.RetryConn, 1, 1)
 	// 每个连接的读缓存
-	read_buff_len := judgeInt(cfg.ReadBuffer, 1, 64)
+	db.rbuf = judgeInt(cfg.ReadBuffer, 1, 64)
 	// 连接池
-	db.conn = make(chan *conn, max_conn)
-	for i := 0; i < max_conn; i++ {
-		db.conn <- &conn{
-			reConn: re_try,
-			rbuf:   make([]byte, read_buff_len),
-		}
-	}
 	return db
 }
 
@@ -174,4 +184,34 @@ func parseInt(b []byte) (n int) {
 		}
 	}
 	return
+}
+
+// 将n格式化写入b，b保证有21个字节长度
+func formatInt(b []byte, n int) int {
+	i := 0
+	// 负数
+	if n < 0 {
+		b[i] = '-'
+		n = 0 - n
+		i = 1
+	}
+	// 写入数组
+	for n > 0 {
+		b[i] = byte('0' + n%10)
+		i++
+		n /= 10
+	}
+	// 反转
+	c := byte(0)
+	i1 := 0
+	i2 := i - 1
+	for i1 < i2 {
+		c = b[i1]
+		b[i1] = b[i2]
+		b[i2] = c
+		i2--
+		i1++
+	}
+	// 换行crlf
+	return i
 }

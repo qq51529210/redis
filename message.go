@@ -16,7 +16,7 @@ func (this DataType) String() string {
 	case DataTypeError:
 		return "error"
 	case DataTypeInteger:
-		return "integer"
+		return "length"
 	case DataTypeString:
 		return "string"
 	case DataTypeArray:
@@ -76,9 +76,9 @@ func PutResponse(m *Response) {
 
 // 请求对象
 type Request struct {
-	b []byte // 缓存
-	c []byte // 顶级的命令的个数缓存
-	n int    // 写入的个数
+	b []byte   // 缓存
+	c [24]byte // 顶级的命令的个数缓存
+	n int      // 写入的个数
 }
 
 // 重置缓存
@@ -91,59 +91,113 @@ func (this *Request) Reset() *Request {
 // 写入字符串($)，或者是其他二进制数据
 func (this *Request) String(s string) *Request {
 	// 字符串长度
-	this.b = this.integer('$', len(s), this.b)
-	// 字符串
-	this.b = append(this.b, s...)
-	// 换行crlf
-	this.b = append(this.b, crlf...)
+	this.string(s)
 	this.n++
 	return this
+}
+
+func (this *Request) string(s string) {
+	// 字符串长度
+	this.length('$', len(s))
+	// 字符串
+	this.b = append(this.b, s...)
+	// crlf
+	this.b = append(this.b, crlf...)
 }
 
 // 写入二进制数据($)，其实也会转换为字符串
 func (this *Request) Bytes(b []byte) *Request {
-	// 字符串长度
-	this.b = this.integer('$', len(b), this.b)
-	// 字符串
-	this.b = append(this.b, b...)
-	// 换行crlf
-	this.b = append(this.b, crlf...)
+	this.bytes(b)
 	this.n++
+	return this
+}
+
+func (this *Request) bytes(b []byte) *Request {
+	// 字符串长度
+	this.length('$', len(b))
+	// 二进制
+	this.b = append(this.b, b...)
+	// crlf
+	this.b = append(this.b, crlf...)
 	return this
 }
 
 // 写入整数(:)
+// 通信协议上这样写，redis服务却又不接受整数值，必须转成string
+// ERR Protocol error: expected '$', got ':', error
 func (this *Request) Integer(n int) *Request {
-	this.b = this.integer(':', n, this.b)
+	this.integer(n)
 	this.n++
 	return this
+}
+
+func (this *Request) integer(n int) *Request {
+	n = formatInt(this.c[0:], n)
+	this.length('$', n)
+	this.b = append(this.b, this.c[:n]...)
+	this.b = append(this.b, crlf...)
+	return this
+}
+
+// 依次写入标记($)/(:)/(*)，整数(n)，crlf
+func (this *Request) length(c byte, n int) {
+	// 标记，:/$/*
+	this.b = append(this.b, c)
+	// 负数
+	if n < 0 {
+		this.b = append(this.b, '-')
+		n = 0 - n
+	}
+	// 写入数组
+	i1 := len(this.b)
+	for n > 0 {
+		this.b = append(this.b, byte('0'+n%10))
+		n /= 10
+	}
+	// 反转
+	i2 := len(this.b) - 1
+	for i1 < i2 {
+		c = this.b[i1]
+		this.b[i1] = this.b[i2]
+		this.b[i2] = c
+		i2--
+		i1++
+	}
+	// 换行crlf
+	this.b = append(this.b, crlf...)
 }
 
 // 写入整数数组(*)
+// redis服务不接受数组值
+// ERR Protocol error: expected '$', got '*', error
 func (this *Request) ArrayInt(a []int) *Request {
-	this.b = this.integer('*', len(a), this.b)
+	this.length('*', len(a))
 	for i := 0; i < len(a); i++ {
-		this.b = this.integer(':', a[i], this.b)
+		this.integer(a[i])
 	}
 	this.n++
 	return this
 }
 
 // 写入字符串数组(*)
+// redis服务不接受数组值
+// ERR Protocol error: expected '$', got '*', error
 func (this *Request) ArrayString(a []string) *Request {
-	this.b = this.integer('*', len(a), this.b)
+	this.length('*', len(a))
 	for i := 0; i < len(a); i++ {
-		this.String(a[i])
+		this.string(a[i])
 	}
 	this.n++
 	return this
 }
 
 // 写入字符串数组(*)
+// redis服务不接受数组值
+// ERR Protocol error: expected '$', got '*', error
 func (this *Request) ArrayBytes(a [][]byte) *Request {
-	this.b = this.integer('*', len(a), this.b)
+	this.length('*', len(a))
 	for i := 0; i < len(a); i++ {
-		this.Bytes(a[i])
+		this.bytes(a[i])
 	}
 	this.n++
 	return this
@@ -156,8 +210,6 @@ func (this *Request) Write(cmd ... string) *Request {
 	if n < 1 {
 		return this
 	}
-	// 重置
-	this.b = this.b[:0]
 	// 字符串
 	for i := 0; i < n; i++ {
 		this.String(cmd[i])
@@ -175,43 +227,6 @@ func (this *Request) simpleStrings(c byte, s string) {
 	this.b = append(this.b, s...)
 	// 换行crlf
 	this.b = append(this.b, crlf...)
-}
-
-// 依次写入标记($)/(:)/(*)，整数(n)，crlf
-func (this *Request) integer(c byte, n int, b []byte) []byte {
-	// 标记，:/$/*
-	b = append(b, c)
-	// 负数
-	if n < 0 {
-		b = append(b, '-')
-		n = 0 - n
-	}
-	// 写入数组
-	i1 := len(b)
-	for n > 0 {
-		b = append(b, byte('0'+n%10))
-		n /= 10
-	}
-	// 反转
-	i2 := len(b) - 1
-	for i1 < i2 {
-		c = b[i1]
-		b[i1] = b[i2]
-		b[i2] = c
-		i2--
-		i1++
-	}
-	// 换行crlf
-	b = append(b, crlf...)
-	return b
-}
-
-// 写入顶级的命令个数
-func (this *Request) cmdCount() {
-	this.c = this.c[:0]
-	if this.n > 1 {
-		this.c = this.integer('*', this.n, this.c)
-	}
 }
 
 // 消息对象
@@ -257,4 +272,15 @@ func (this *Response) Read() (string, DataType) {
 	default:
 		return "", DataTypeUnknown
 	}
+}
+
+// 查找第一个crlf并写入标记
+func (this *Response) crlf(i int) int {
+	for ; i < len(this.b); i++ {
+		if this.b[i] == '\n' && this.b[i-1] == '\r' {
+			this.i = append(this.i, i+1)
+			return i
+		}
+	}
+	return -1
 }

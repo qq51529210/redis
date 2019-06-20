@@ -8,20 +8,19 @@ import (
 
 // 表示一个连接对象
 type conn struct {
-	conn   net.Conn // 底层的连接
-	valid  bool     // 当前连接是否有效
-	reConn int      // 失败重新连接次数
-	rbuf   []byte   // 读缓存
+	conn  net.Conn // 底层的连接
+	valid bool     // 当前连接是否有效
+	rbuf  []byte   // 读缓存
 }
 
 // 看Redis.Cmd函数说明
 // 参数dial在Redis.Cmd函数中指定
-func (this *conn) Cmd(dial DialFunc, timeout time.Duration, request *Request, response *Response) (rn int, wn int, e error) {
+func (this *conn) Cmd(ctx *dialContext, request *Request, response *Response) (rn int, wn int, e error) {
 	// 检查连接
 	if !this.valid {
 		// 失败重试
-		for i := 0; i < this.reConn; i++ {
-			this.conn, e = dial()
+		for i := 0; i < ctx.retry; i++ {
+			this.conn, e = ctx.dial()
 			if nil == e {
 				this.valid = true
 				break
@@ -29,31 +28,39 @@ func (this *conn) Cmd(dial DialFunc, timeout time.Duration, request *Request, re
 		}
 	}
 	// 发送请求
-	wn, e = this.write(request, timeout)
+	wn, e = this.write(request, ctx.timeout)
 	if nil != e {
 		return
 	}
 	// 接收响应
 	response.reset()
-	rn, e = this.read(response, timeout)
+	rn, e = this.read(response, ctx.timeout)
 	return
 }
 
 // 发送请求
 func (this *conn) write(request *Request, timeout time.Duration) (wn int, e error) {
-	request.cmdCount()
-	// 发送请求
 	if timeout > 0 {
-		// 写超时
 		e = this.conn.SetWriteDeadline(time.Now().Add(timeout))
 		if nil != e {
 			return
 		}
 	}
+
 	n := 0
-	if len(request.c) > 0 {
-		n, e = this.conn.Write(request.c)
+	if request.n > 1 {
+		request.c[0] = '*'
+		n = formatInt(request.c[1:], request.n) + 1
+		n += copy(request.c[n:], crlf)
+		n, e = this.conn.Write(request.c[:n])
 		wn += n
+		if nil != e {
+			return
+		}
+	}
+
+	if timeout > 0 {
+		e = this.conn.SetWriteDeadline(time.Now().Add(timeout))
 		if nil != e {
 			return
 		}
@@ -65,24 +72,25 @@ func (this *conn) write(request *Request, timeout time.Duration) (wn int, e erro
 
 // 接收响应
 func (this *conn) read(response *Response, timeout time.Duration) (rn int, e error) {
+	// response.b中新行的起始索引
+	idx := response.i[len(response.i)-1]
 	n := 0
-	n, e = this.readData(response, timeout)
-	rn += n
-	if nil != e {
-		return
+	// 需要再读数据
+	if idx == len(response.b) {
+		n, e = this.readData(response, timeout)
+		rn += n
+		if nil != e {
+			return
+		}
 	}
 	// 消息类型
-	switch response.b[response.i[len(response.i)-1]] {
+	switch response.b[idx] {
 	case '+', '-', ':':
 		// 这些消息都是单行
 		for {
 			// 是否已经读完一行
-			n = len(response.b) - 2
-			if n > 0 {
-				if response.b[n] == '\r' && this.rbuf[n+1] == '\n' {
-					response.i = append(response.i, n+2)
-					break
-				}
+			if response.crlf(idx+1) > 0 {
+				return
 			}
 			// 继续读
 			n, e = this.readData(response, timeout)
@@ -92,44 +100,37 @@ func (this *conn) read(response *Response, timeout time.Duration) (rn int, e err
 			}
 		}
 	case '$':
-		// 这个消息要读两行
-		i := response.i[len(response.i)-1] + 1
-		for {
-			for ; i < len(response.b); i++ {
-				if response.b[i] == '\n' && response.b[i-1] == '\r' {
-					response.i = append(response.i, i+1)
+		// 先读字符串长度
+		i1 := idx + 1
+		i2 := i1
+		i2, n, e = this.readLine(response, timeout, i2)
+		rn += n
+		if nil != e {
+			return
+		}
+		m := parseInt(response.b[i1:i2-1])
+		if m > 0 {
+			// 有值，再读指定的长度+crlf
+			m = m + idx + 2
+			for m > 0 {
+				i2, n, e = this.readLine(response, timeout, i2+1)
+				rn += n
+				m -= i2
+				if nil != e {
+					return
 				}
-			}
-			if len(response.i) > 2 {
-				break
-			}
-			// 继续读
-			n, e = this.readData(response, timeout)
-			rn += n
-			if nil != e {
-				return
 			}
 		}
 	case '*':
 		// 先读完数组长度行
-		count := -1
-	CountLoop:
-		for {
-			for i := 0; i < len(response.b); i++ {
-				if response.b[i] == '\n' && response.b[i-1] == '\r' {
-					count = parseInt(response.b[1:i-2])
-					i++
-					response.i = append(response.i, i)
-					break CountLoop
-				}
-			}
-			// 继续读
-			n, e = this.readData(response, timeout)
-			rn += n
-			if nil != e {
-				return
-			}
+		i1 := idx + 1
+		i2 := i1
+		i2, n, e = this.readLine(response, timeout, i2)
+		rn += n
+		if nil != e {
+			return
 		}
+		count := parseInt(response.b[i1:i2-1])
 		// 读数组的元素
 		for j := 0; j < count; j++ {
 			n, e = this.read(response, timeout)
@@ -158,6 +159,26 @@ func (this *conn) readData(response *Response, t time.Duration) (n int, e error)
 	}
 	response.b = append(response.b, this.rbuf[:n]...)
 	return
+}
+
+// 扫描第一行数据的crlf索引，数据不足则从net.Conn中读取
+func (this *conn) readLine(response *Response, timeout time.Duration, i int) (int, int, error) {
+	var n, rn int
+	var e error
+	for {
+		i = response.crlf(i)
+		if i > 0 {
+			break
+		}
+		i = len(response.b)
+		// 继续读
+		n, e = this.readData(response, timeout)
+		rn += n
+		if nil != e {
+			return i, rn, e
+		}
+	}
+	return i, rn, nil
 }
 
 // 关闭这个连接
