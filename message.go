@@ -1,6 +1,7 @@
 package redis
 
 import (
+	"io"
 	"sync"
 )
 
@@ -272,6 +273,41 @@ func (this *Response) Read() (string, DataType) {
 		return string(this.b[i1+1:i2-2]), DataTypeArray
 	default:
 		return "", DataTypeUnknown
+	}
+}
+
+func (this *Response) ReadTo(w io.Writer) DataType {
+	if this.n == len(this.i)-1 {
+		return DataTypeNil
+	}
+	i1 := this.i[this.n]
+	this.n++
+	i2 := this.i[this.n]
+	switch this.b[i1] {
+	case '+':
+		w.Write(this.b[i1+1:i2-2])
+		return DataTypeResponse
+	case '-':
+		w.Write(this.b[i1+1:i2-2])
+		return DataTypeError
+	case ':':
+		w.Write(this.b[i1+1:i2-2])
+		return DataTypeInteger
+	case '$':
+		// 下一个
+		if this.n == len(this.i)-1 {
+			return DataTypeNil
+		}
+		i1 := this.i[this.n]
+		this.n++
+		i2 := this.i[this.n]
+		w.Write(this.b[i1:i2-2])
+		return DataTypeString
+	case '*':
+		w.Write(this.b[i1+1:i2-2])
+		return DataTypeArray
+	default:
+		return DataTypeUnknown
 	}
 }
 
