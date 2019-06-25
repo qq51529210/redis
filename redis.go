@@ -187,7 +187,7 @@ func parseInt(b []byte) (n int) {
 }
 
 // 将n格式化写入b，b保证有21个字节长度
-func formatInt(b []byte, n int) int {
+func formatInt(b []byte, n int64) int {
 	i := 0
 	// 负数
 	if n < 0 {

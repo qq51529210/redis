@@ -126,13 +126,13 @@ func (this *Request) bytes(b []byte) *Request {
 // 写入整数(:)
 // 通信协议上这样写，redis服务却又不接受整数值，必须转成string
 // ERR Protocol error: expected '$', got ':', error
-func (this *Request) Integer(n int) *Request {
+func (this *Request) Integer(n int64) *Request {
 	this.integer(n)
 	this.n++
 	return this
 }
 
-func (this *Request) integer(n int) *Request {
+func (this *Request) integer(n int64) *Request {
 	n = formatInt(this.c[0:], n)
 	this.length('$', n)
 	this.b = append(this.b, this.c[:n]...)
