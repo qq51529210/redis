@@ -60,6 +60,9 @@ func init() {
 }
 
 func GetRequest() *Request {
+	//r := requestPool.Get().(*Request)
+	//r.Reset()
+	//return r
 	return requestPool.Get().(*Request)
 }
 
@@ -133,9 +136,9 @@ func (this *Request) Integer(n int64) *Request {
 }
 
 func (this *Request) integer(n int64) *Request {
-	n = formatInt(this.c[0:], n)
-	this.length('$', n)
-	this.b = append(this.b, this.c[:n]...)
+	m := formatInt(this.c[0:], n)
+	this.length('$', m)
+	this.b = append(this.b, this.c[:m]...)
 	this.b = append(this.b, crlf...)
 	return this
 }
@@ -171,7 +174,7 @@ func (this *Request) length(c byte, n int) {
 // 写入整数数组(*)
 // redis服务不接受数组值
 // ERR Protocol error: expected '$', got '*', error
-func (this *Request) ArrayInt(a []int) *Request {
+func (this *Request) ArrayInt(a []int64) *Request {
 	this.length('*', len(a))
 	for i := 0; i < len(a); i++ {
 		this.integer(a[i])

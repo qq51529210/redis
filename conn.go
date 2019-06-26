@@ -50,7 +50,7 @@ func (this *conn) write(request *Request, timeout time.Duration) (wn int, e erro
 	n := 0
 	if request.n > 1 {
 		request.c[0] = '*'
-		n = formatInt(request.c[1:], request.n) + 1
+		n = formatInt(request.c[1:], int64(request.n)) + 1
 		n += copy(request.c[n:], crlf)
 		n, e = this.conn.Write(request.c[:n])
 		wn += n
