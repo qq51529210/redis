@@ -2,6 +2,7 @@ package redis
 
 import (
 	"errors"
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -143,6 +144,24 @@ func (this *Redis) Get(key string) (string, error) {
 // 错误
 func (this *Redis) defaultDial() (net.Conn, error) {
 	return net.DialTimeout("tcp", this.host, this.dialContext.timeout)
+}
+
+// Cmd的简单版本
+func (this *Redis) GetTo(key string, buf io.Writer) (DataType, error) {
+	r1, r2 := GetRequest(), GetResponse()
+
+	t := DataTypeNil
+
+	r1.String("get").String(key)
+	_, _, e := this.Cmd(r1, r2)
+	if nil == e {
+		t = r2.ReadTo(buf)
+	}
+
+	PutRequest(r1)
+	PutResponse(r2)
+
+	return t, e
 }
 
 // 获取一个可用的连接
