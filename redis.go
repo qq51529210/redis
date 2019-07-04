@@ -138,14 +138,6 @@ func (this *Redis) Get(key string) (string, error) {
 	return s, nil
 }
 
-// 默认的连接方式
-// 返回
-// 底层连接
-// 错误
-func (this *Redis) defaultDial() (net.Conn, error) {
-	return net.DialTimeout("tcp", this.host, this.dialContext.timeout)
-}
-
 // Cmd的简单版本
 func (this *Redis) GetTo(key string, buf io.Writer) (DataType, error) {
 	r1, r2 := GetRequest(), GetResponse()
@@ -162,6 +154,14 @@ func (this *Redis) GetTo(key string, buf io.Writer) (DataType, error) {
 	PutResponse(r2)
 
 	return t, e
+}
+
+// 默认的连接方式
+// 返回
+// 底层连接
+// 错误
+func (this *Redis) defaultDial() (net.Conn, error) {
+	return net.DialTimeout("tcp", this.host, this.dialContext.timeout)
 }
 
 // 获取一个可用的连接
