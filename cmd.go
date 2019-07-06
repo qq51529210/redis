@@ -4,15 +4,7 @@ import (
 	"errors"
 )
 
-func (this *Redis) simpleCmd(msg *Message, cmd ...string) error {
-	n := len(cmd)
-	if n < 1 {
-		return nil
-	}
-	m := GetMessage()
-	for i := 0; i < n; i++ {
-		m.Request.String(cmd[i])
-	}
+func (this *Redis) simpleCmd(m *Message) error {
 	_, _, e := this.Cmd(&m.Request, &m.Response)
 	if nil != e {
 		return e
@@ -25,44 +17,31 @@ func (this *Redis) simpleCmd(msg *Message, cmd ...string) error {
 	return nil
 }
 
-// Cmd的简单版本
-func (this *Redis) Set(key, value string, expire int64) error {
-	m := GetMessage()
-	m.Request.String("set").String(key).String(value)
+func (this *Redis) boolCmd(m *Message) (bool, error) {
 	_, _, e := this.Cmd(&m.Request, &m.Response)
 	if nil != e {
-		PutMessage(m)
-		return e
+		return false, e
 	}
-	m.Builder.Reset()
-	t, _ := m.Response.ReadTo(&m.Builder)
+	m.Buffer.Reset()
+	t, _ := m.Response.ReadTo(&m.Buffer)
 	if t == DataTypeError {
-		PutMessage(m)
-		return errors.New(m.Builder.String())
+		return false, errors.New(m.Builder.String())
 	}
+	return parseInt(m.Buffer.Bytes()) == 1, nil
+}
 
-	if expire > 0 {
-		m.Request.Reset().String("expire").Integer(expire)
-		_, _, e := this.Cmd(&m.Request, &m.Response)
-		if nil != e {
-			PutMessage(m)
-			return e
-		}
-		m.Builder.Reset()
-		t, _ := m.Response.ReadTo(&m.Builder)
-		if t == DataTypeError {
-			PutMessage(m)
-			return errors.New(m.Builder.String())
-		}
-	}
+func (this *Redis) Set(key, value string) error {
+	m := GetMessage()
+	m.Request.Write("set", key, value)
+	e := this.simpleCmd(m)
 	PutMessage(m)
-	return nil
+	return e
 }
 
-// Cmd的简单版本
 func (this *Redis) Get(key string) (string, error) {
 	m := GetMessage()
-	e := this.simpleCmd(m, "get", key)
+	m.Request.Write("get", key)
+	e := this.simpleCmd(m)
 	if nil != e {
 		PutMessage(m)
 		return "", e
@@ -72,22 +51,18 @@ func (this *Redis) Get(key string) (string, error) {
 	return s, e
 }
 
-// Cmd的简单版本
 func (this *Redis) Exists(key string) (bool, error) {
 	m := GetMessage()
-	m.Request.String("exists").String(key)
-	_, _, e := this.Cmd(&m.Request, &m.Response)
-	if nil != e {
-		PutMessage(m)
-		return false, e
-	}
-	m.Buffer.Reset()
-	t, _ := m.Response.ReadTo(&m.Buffer)
-	if t == DataTypeError {
-		PutMessage(m)
-		return false, e
-	}
-	b := parseInt(m.Buffer.Bytes()) == 1
+	m.Request.Write("exists", key)
+	b, e := this.boolCmd(m)
+	PutMessage(m)
+	return b, e
+}
+
+func (this *Redis) Expire(key string, expire int64) (bool, error) {
+	m := GetMessage()
+	m.Request.Reset().String("expire").String(key).Integer(expire)
+	b, e := this.boolCmd(m)
 	PutMessage(m)
 	return b, e
 }
