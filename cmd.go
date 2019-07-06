@@ -59,6 +59,14 @@ func (this *Redis) Exists(key string) (bool, error) {
 	return b, e
 }
 
+func (this *Redis) Del(key string) (bool, error) {
+	m := GetMessage()
+	m.Request.Write("del", key)
+	b, e := this.boolCmd(m)
+	PutMessage(m)
+	return b, e
+}
+
 func (this *Redis) Expire(key string, expire int64) (bool, error) {
 	m := GetMessage()
 	m.Request.Reset().String("expire").String(key).Integer(expire)
