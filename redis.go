@@ -2,7 +2,6 @@ package redis
 
 import (
 	"errors"
-	"io"
 	"net"
 	"sync"
 	"time"
@@ -76,84 +75,6 @@ func (this *Redis) Cmd(request *Request, response *Response) (int, int, error) {
 	// 缓存连接
 	this.putConn(c)
 	return rn, wn, e
-}
-
-// Cmd的简单版本
-func (this *Redis) Set(key, value string, expire int64) error {
-	r1, r2 := GetRequest(), GetResponse()
-
-	r1.String("set").String(key).String(value)
-	_, _, e := this.Cmd(r1, r2)
-	if nil != e {
-		PutRequest(r1)
-		PutResponse(r2)
-		return e
-	}
-
-	if expire > 0 {
-		r1.Reset().String("expire").Integer(expire)
-		_, _, e := this.Cmd(r1, r2)
-		if nil != e {
-			PutRequest(r1)
-			PutResponse(r2)
-			return e
-		}
-	}
-
-	s, t := r2.Read()
-	if t == DataTypeError {
-		PutRequest(r1)
-		PutResponse(r2)
-		return errors.New(s)
-	}
-
-	PutRequest(r1)
-	PutResponse(r2)
-
-	return nil
-}
-
-// Cmd的简单版本
-func (this *Redis) Get(key string) (string, error) {
-	r1, r2 := GetRequest(), GetResponse()
-
-	r1.String("get").String(key)
-	_, _, e := this.Cmd(r1, r2)
-	if nil != e {
-		PutRequest(r1)
-		PutResponse(r2)
-		return "", e
-	}
-
-	s, t := r2.Read()
-	if t == DataTypeError {
-		PutRequest(r1)
-		PutResponse(r2)
-		return "", errors.New(s)
-	}
-
-	PutRequest(r1)
-	PutResponse(r2)
-
-	return s, nil
-}
-
-// Cmd的简单版本
-func (this *Redis) GetTo(key string, buf io.Writer) (DataType, error) {
-	r1, r2 := GetRequest(), GetResponse()
-
-	t := DataTypeNil
-
-	r1.String("get").String(key)
-	_, _, e := this.Cmd(r1, r2)
-	if nil == e {
-		t = r2.ReadTo(buf)
-	}
-
-	PutRequest(r1)
-	PutResponse(r2)
-
-	return t, e
 }
 
 // 默认的连接方式

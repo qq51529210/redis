@@ -1,7 +1,10 @@
 package redis
 
 import (
+	"bytes"
+	"errors"
 	"io"
+	"strings"
 	"sync"
 )
 
@@ -41,10 +44,13 @@ var (
 	// 消息池
 	requestPool  = sync.Pool{}
 	responsePool = sync.Pool{}
+	messagePool  = sync.Pool{}
 	// 结尾
 	crlf = []byte{'\r', '\n'}
 	// 缓存池
 	bufferPool = sync.Pool{}
+	// 错误
+	ErrUnknownDataType = errors.New("unknown data type from server")
 )
 
 func init() {
@@ -53,6 +59,9 @@ func init() {
 	}
 	responsePool.New = func() interface{} {
 		return &Response{}
+	}
+	messagePool.New = func() interface{} {
+		return &Message{}
 	}
 	bufferPool.New = func() interface{} {
 		return make([]byte, 0)
@@ -76,6 +85,14 @@ func GetResponse() *Response {
 
 func PutResponse(m *Response) {
 	requestPool.Put(m)
+}
+
+func GetMessage() *Message {
+	return messagePool.Get().(*Message)
+}
+
+func PutMessage(m *Message) {
+	messagePool.Put(m)
 }
 
 // 请求对象
@@ -279,38 +296,39 @@ func (this *Response) Read() (string, DataType) {
 	}
 }
 
-func (this *Response) ReadTo(w io.Writer) DataType {
+// 返回下一个数据类型，并将数据写到writer中
+func (this *Response) ReadTo(w io.Writer) (DataType, error) {
 	if this.n == len(this.i)-1 {
-		return DataTypeNil
+		return DataTypeNil, nil
 	}
 	i1 := this.i[this.n]
 	this.n++
 	i2 := this.i[this.n]
 	switch this.b[i1] {
 	case '+':
-		w.Write(this.b[i1+1:i2-2])
-		return DataTypeResponse
+		_, e := w.Write(this.b[i1+1:i2-2])
+		return DataTypeResponse, e
 	case '-':
-		w.Write(this.b[i1+1:i2-2])
-		return DataTypeError
+		_, e := w.Write(this.b[i1+1:i2-2])
+		return DataTypeError, e
 	case ':':
-		w.Write(this.b[i1+1:i2-2])
-		return DataTypeInteger
+		_, e := w.Write(this.b[i1+1:i2-2])
+		return DataTypeInteger, e
 	case '$':
 		// 下一个
 		if this.n == len(this.i)-1 {
-			return DataTypeNil
+			return DataTypeNil, nil
 		}
 		i1 := this.i[this.n]
 		this.n++
 		i2 := this.i[this.n]
-		w.Write(this.b[i1:i2-2])
-		return DataTypeString
+		_, e := w.Write(this.b[i1:i2-2])
+		return DataTypeString, e
 	case '*':
-		w.Write(this.b[i1+1:i2-2])
-		return DataTypeArray
+		_, e := w.Write(this.b[i1+1:i2-2])
+		return DataTypeArray, e
 	default:
-		return DataTypeUnknown
+		return DataTypeUnknown, ErrUnknownDataType
 	}
 }
 
@@ -323,4 +341,11 @@ func (this *Response) crlf(i int) int {
 		}
 	}
 	return -1
+}
+
+type Message struct {
+	Request
+	Response
+	bytes.Buffer
+	strings.Builder
 }
