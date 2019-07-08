@@ -92,6 +92,9 @@ func GetMessage() *Message {
 }
 
 func PutMessage(m *Message) {
+	m.Request.Reset()
+	m.Builder.Reset()
+	m.Buffer.Reset()
 	messagePool.Put(m)
 }
 

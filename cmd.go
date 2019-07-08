@@ -2,9 +2,10 @@ package redis
 
 import (
 	"errors"
+	"io"
 )
 
-func (this *Redis) simpleCmd(m *Message) error {
+func (this *Redis) stringCmd(m *Message) error {
 	_, _, e := this.Cmd(&m.Request, &m.Response)
 	if nil != e {
 		return e
@@ -25,6 +26,8 @@ func (this *Redis) boolCmd(m *Message) (bool, error) {
 	m.Buffer.Reset()
 	t, _ := m.Response.ReadTo(&m.Buffer)
 	if t == DataTypeError {
+		m.Builder.Reset()
+		io.Copy(&m.Builder, &m.Buffer)
 		return false, errors.New(m.Builder.String())
 	}
 	return parseInt(m.Buffer.Bytes()) == 1, nil
@@ -32,8 +35,8 @@ func (this *Redis) boolCmd(m *Message) (bool, error) {
 
 func (this *Redis) Set(key, value string) error {
 	m := GetMessage()
-	m.Request.Write("set", key, value)
-	e := this.simpleCmd(m)
+	m.Request.String("set").String(key).String(value)
+	e := this.stringCmd(m)
 	PutMessage(m)
 	return e
 }
@@ -41,7 +44,7 @@ func (this *Redis) Set(key, value string) error {
 func (this *Redis) Get(key string) (string, error) {
 	m := GetMessage()
 	m.Request.Write("get", key)
-	e := this.simpleCmd(m)
+	e := this.stringCmd(m)
 	if nil != e {
 		PutMessage(m)
 		return "", e
@@ -69,7 +72,7 @@ func (this *Redis) Del(key string) (bool, error) {
 
 func (this *Redis) Expire(key string, expire int64) (bool, error) {
 	m := GetMessage()
-	m.Request.Reset().String("expire").String(key).Integer(expire)
+	m.Request.String("expire").String(key).Integer(expire)
 	b, e := this.boolCmd(m)
 	PutMessage(m)
 	return b, e

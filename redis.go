@@ -196,6 +196,9 @@ func formatInt(b []byte, n int64) int {
 		i = 1
 	}
 	// 写入数组
+	b[i] = byte('0' + n%10)
+	i++
+	n /= 10
 	for n > 0 {
 		b[i] = byte('0' + n%10)
 		i++
