@@ -1,6 +1,7 @@
 package redis
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 )
@@ -76,4 +77,33 @@ func (this *Redis) Expire(key string, expire int64) (bool, error) {
 	b, e := this.boolCmd(m)
 	PutMessage(m)
 	return b, e
+}
+
+func (this *Redis) SetJson(key string, value interface{}) error {
+	d, e := json.Marshal(value)
+	if nil != e {
+		return e
+	}
+	m := GetMessage()
+	m.Request.String("set").String(key).Bytes(d)
+	e = this.stringCmd(m)
+	PutMessage(m)
+	return e
+}
+
+func (this *Redis) GetJson(key string, value interface{}) error {
+	m := GetMessage()
+	m.Request.Write("get", key)
+	_, _, e := this.Cmd(&m.Request, &m.Response)
+	if nil != e {
+		return e
+	}
+	m.Buffer.Reset()
+	t, _ := m.Response.ReadTo(&m.Buffer)
+	if t == DataTypeError {
+		return errors.New(string(m.Buffer.Bytes()))
+	}
+	e = json.Unmarshal(m.Buffer.Bytes(), value)
+	PutMessage(m)
+	return e
 }
