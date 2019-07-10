@@ -34,10 +34,16 @@ func (this *Redis) boolCmd(m *Message) (bool, error) {
 	return parseInt(m.Buffer.Bytes()) == 1, nil
 }
 
-func (this *Redis) Set(key, value string) error {
+func (this *Redis) Set(key, value string, expire int64) error {
 	m := GetMessage()
 	m.Request.String("set").String(key).String(value)
 	e := this.stringCmd(m)
+	if nil != e {
+		PutMessage(m)
+		return e
+	}
+	m.Request.Reset().String("expire").String(key).Integer(expire)
+	_, e = this.boolCmd(m)
 	PutMessage(m)
 	return e
 }
@@ -79,7 +85,7 @@ func (this *Redis) Expire(key string, expire int64) (bool, error) {
 	return b, e
 }
 
-func (this *Redis) SetJson(key string, value interface{}) error {
+func (this *Redis) SetJson(key string, value interface{}, expire int64) error {
 	d, e := json.Marshal(value)
 	if nil != e {
 		return e
@@ -87,6 +93,12 @@ func (this *Redis) SetJson(key string, value interface{}) error {
 	m := GetMessage()
 	m.Request.String("set").String(key).Bytes(d)
 	e = this.stringCmd(m)
+	if nil != e {
+		PutMessage(m)
+		return e
+	}
+	m.Request.Reset().String("expire").String(key).Integer(expire)
+	_, e = this.boolCmd(m)
 	PutMessage(m)
 	return e
 }
