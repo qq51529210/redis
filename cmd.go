@@ -91,19 +91,24 @@ func (this *Redis) SetJson(key string, value interface{}) error {
 	return e
 }
 
-func (this *Redis) GetJson(key string, value interface{}) error {
+func (this *Redis) GetJson(key string, value interface{}) (bool, error) {
 	m := GetMessage()
 	m.Request.Write("get", key)
 	_, _, e := this.Cmd(&m.Request, &m.Response)
 	if nil != e {
-		return e
+		return false, e
 	}
 	m.Buffer.Reset()
 	t, _ := m.Response.ReadTo(&m.Buffer)
 	if t == DataTypeError {
-		return errors.New(string(m.Buffer.Bytes()))
+		PutMessage(m)
+		return false, errors.New(string(m.Buffer.Bytes()))
+	}
+	if t == DataTypeNil {
+		PutMessage(m)
+		return false, nil
 	}
 	e = json.Unmarshal(m.Buffer.Bytes(), value)
 	PutMessage(m)
-	return e
+	return true, e
 }
