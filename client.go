@@ -32,9 +32,11 @@ type Client struct {
 }
 
 // 开始一条新的命令
-func (c *Client) NewCmd(cmd string) *Cmd {
+func (c *Client) NewCmd(cmd ...string) *Cmd {
 	_cmd := getCmd()
-	_cmd.String(cmd)
+	for i := 0; i < len(cmd); i++ {
+		_cmd.String(cmd[i])
+	}
 	return _cmd
 }
 
@@ -91,14 +93,8 @@ func (c *Client) DoCmd(cmd *Cmd) (value interface{}, err error) {
 
 // 执行命令
 func (c *Client) Do(cmd ...string) (value interface{}, err error) {
-	if len(cmd) > 0 {
-		_cmd := c.NewCmd(cmd[0])
-		for i := 1; i < len(cmd); i++ {
-			_cmd.String(cmd[i])
-		}
-		value, err = c.DoCmd(_cmd)
-	}
-	return
+	_cmd := c.NewCmd(cmd...)
+	return c.DoCmd(_cmd)
 }
 
 // 关闭
