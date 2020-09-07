@@ -128,7 +128,7 @@ func (c *Cmd) Float(n float64) {
 // switch v.(type)
 // case intxx,uintxx: Int()
 // case string: String()
-// case Floatxx: Float()
+// case floatxx: Float()
 // case []byte: Bytes()
 // default: Json
 func (c *Cmd) Value(v interface{}) error {
