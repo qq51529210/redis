@@ -32,7 +32,7 @@ type Client struct {
 }
 
 // 开始一条新的命令
-func (this *Client) NewCmd(cmd string) *Cmd {
+func (c *Client) NewCmd(cmd string) *Cmd {
 	_cmd := getCmd()
 	_cmd.String(cmd)
 	return _cmd
@@ -44,10 +44,10 @@ func (this *Client) NewCmd(cmd string) *Cmd {
 // case error:
 // case string:
 // case []interface:
-func (this *Client) DoCmd(cmd *Cmd) (value interface{}, err error) {
+func (c *Client) DoCmd(cmd *Cmd) (value interface{}, err error) {
 	var conn net.Conn
 	// net.Conn
-	conn, err = this.getConn()
+	conn, err = c.getConn()
 	if err != nil {
 		putCmd(cmd)
 		return
@@ -55,24 +55,24 @@ func (this *Client) DoCmd(cmd *Cmd) (value interface{}, err error) {
 	// 请求
 	{
 		// 设置超时
-		err = conn.SetWriteDeadline(time.Now().Add(this.wto))
+		err = conn.SetWriteDeadline(time.Now().Add(c.wto))
 		if err != nil {
-			this.onNetError(conn, cmd, err)
+			c.onNetError(conn, cmd, err)
 			return
 		}
 		// 发送
 		_, err = cmd.WriteTo(conn)
 		if err != nil {
-			this.onNetError(conn, cmd, err)
+			c.onNetError(conn, cmd, err)
 			return
 		}
 	}
 	// 响应
 	{
 		// 设置超时
-		err = conn.SetReadDeadline(time.Now().Add(this.rto))
+		err = conn.SetReadDeadline(time.Now().Add(c.rto))
 		if err != nil {
-			this.onNetError(conn, cmd, err)
+			c.onNetError(conn, cmd, err)
 			return
 		}
 		// 读取，解析，返回响应数据
@@ -80,49 +80,49 @@ func (this *Client) DoCmd(cmd *Cmd) (value interface{}, err error) {
 		cmd.idx = 0
 		value, err = cmd.ReadValue(conn)
 		if err != nil {
-			this.onNetError(conn, cmd, err)
+			c.onNetError(conn, cmd, err)
 			return
 		}
 	}
 	putCmd(cmd)
-	this.putConn(conn)
+	c.putConn(conn)
 	return
 }
 
 // 执行命令
-func (this *Client) Do(cmd ...string) (value interface{}, err error) {
+func (c *Client) Do(cmd ...string) (value interface{}, err error) {
 	if len(cmd) > 0 {
-		_cmd := this.NewCmd(cmd[0])
+		_cmd := c.NewCmd(cmd[0])
 		for i := 1; i < len(cmd); i++ {
 			_cmd.String(cmd[i])
 		}
-		this.DoCmd(_cmd)
+		value, err = c.DoCmd(_cmd)
 	}
 	return
 }
 
 // 关闭
-func (this *Client) Close() error {
+func (c *Client) Close() error {
 	// 改变状态
-	this.cond.L.Lock()
-	if !this.valid {
-		this.cond.L.Unlock()
+	c.cond.L.Lock()
+	if !c.valid {
+		c.cond.L.Unlock()
 		return useClosedRedis
 	}
-	this.valid = false
-	this.cond.L.Unlock()
+	c.valid = false
+	c.cond.L.Unlock()
 	// 关闭所有连接
-	for i := 0; i < len(this.all); i++ {
-		this.all[i].Close()
+	for i := 0; i < len(c.all); i++ {
+		c.all[i].Close()
 	}
 	return nil
 }
 
 // DoCmd()，处理网络错误的代码
-func (this *Client) onNetError(conn net.Conn, cmd *Cmd, err error) {
-	if net_err, ok := err.(net.Error); ok {
-		if net_err.Timeout() || net_err.Temporary() {
-			this.putConn(conn)
+func (c *Client) onNetError(conn net.Conn, cmd *Cmd, err error) {
+	if netErr, ok := err.(net.Error); ok {
+		if netErr.Timeout() || netErr.Temporary() {
+			c.putConn(conn)
 		} else {
 			conn.Close()
 		}
@@ -131,45 +131,45 @@ func (this *Client) onNetError(conn net.Conn, cmd *Cmd, err error) {
 }
 
 // 获取一个可用的连接，返回conn或者
-func (this *Client) getConn() (net.Conn, error) {
-	this.cond.L.Lock()
-	for this.valid {
+func (c *Client) getConn() (net.Conn, error) {
+	c.cond.L.Lock()
+	for c.valid {
 		// 是否有可用的连接
-		n := len(this.free) - 1
+		n := len(c.free) - 1
 		if n > 0 {
 			// 最后一个
-			conn := this.free[n]
-			this.free = this.free[:n]
-			this.cond.L.Unlock()
+			conn := c.free[n]
+			c.free = c.free[:n]
+			c.cond.L.Unlock()
 			return conn, nil
 		}
 		// 是否可以添加新net.Conn
-		if len(this.all) < cap(this.all) {
-			conn, err := this.dial()
+		if len(c.all) < cap(c.all) {
+			conn, err := c.dial()
 			if err == nil {
-				this.all = append(this.all, conn)
+				c.all = append(c.all, conn)
 			}
-			this.cond.L.Unlock()
+			c.cond.L.Unlock()
 			return conn, err
 		}
 		// 等待空闲的
-		this.cond.Wait()
+		c.cond.Wait()
 	}
-	this.cond.L.Unlock()
+	c.cond.L.Unlock()
 	return nil, useClosedRedis
 }
 
 // 回收连接
-func (this *Client) putConn(conn net.Conn) {
-	this.cond.L.Lock()
-	if this.valid {
-		this.free = append(this.free, conn)
-		this.cond.L.Unlock()
+func (c *Client) putConn(conn net.Conn) {
+	c.cond.L.Lock()
+	if c.valid {
+		c.free = append(c.free, conn)
+		c.cond.L.Unlock()
 		// 通知getConn()有新的可用conn
-		this.cond.Signal()
+		c.cond.Signal()
 		return
 	}
-	this.cond.L.Unlock()
+	c.cond.L.Unlock()
 }
 
 // 返回包含\r\n的数据
