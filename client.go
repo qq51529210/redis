@@ -163,9 +163,9 @@ func (c *Client) putConn(conn net.Conn) {
 }
 
 // 返回包含\r\n的数据
-func indexEndLine(buf []byte) int {
-	for i := 1; i < len(buf); i++ {
-		if buf[i-1] == '\r' && buf[i] == '\n' {
+func indexEndLine(b []byte) int {
+	for i := 1; i < len(b); i++ {
+		if b[i-1] == '\r' && b[i] == '\n' {
 			return i + 1
 		}
 	}
