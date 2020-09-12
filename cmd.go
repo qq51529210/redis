@@ -47,7 +47,7 @@ func (c *Cmd) Reset() {
 }
 
 // 编码简单字符串
-func (c *Cmd) SimpleString(s string) {
+func (c *Cmd) AddSimpleString(s string) {
 	c.cmd++
 	// '+'
 	c.req = append(c.req, '+')
@@ -58,7 +58,7 @@ func (c *Cmd) SimpleString(s string) {
 }
 
 // 编码错误
-func (c *Cmd) Error(s string) {
+func (c *Cmd) AddError(s string) {
 	c.cmd++
 	// '-'
 	c.req = append(c.req, '-')
@@ -70,43 +70,44 @@ func (c *Cmd) Error(s string) {
 
 // 格式化整数，作为字符串处理，否则服务端会报错
 // 定义这个':'协议，但不让客户端用，很奇怪
-func (c *Cmd) Int(n int64) {
+func (c *Cmd) AddInt(n int64) {
 	c.fmt = c.fmt[:0]
 	c.fmt = strconv.AppendInt(c.fmt, n, 10)
-	c.Bytes(c.fmt)
-	//c.cmd++
-	//// ':'
-	//c.req = append(c.req, ':')
-	//// n
-	//c.req = strconv.AppendInt(c.req, n, 10)
-	//// \r\n
-	//c.req = append(c.req, endLine...)
+	c.AddBytes(c.fmt)
 }
 
 // 编码字符串
-func (c *Cmd) String(s string) {
+func (c *Cmd) AddString(s string) {
 	c.cmd++
 	// '$'
 	c.req = append(c.req, '$')
 	// length
-	c.req = strconv.AppendInt(c.req, int64(len(s)), 10)
+	n := int64(len(s))
+	c.req = strconv.AppendInt(c.req, n, 10)
 	// \r\n
 	c.req = append(c.req, endLine...)
-	// b
+	if n < 1 {
+		return
+	}
+	// s
 	c.req = append(c.req, s...)
 	// \r\n
 	c.req = append(c.req, endLine...)
 }
 
 // 编码二进制数组，作为字符串处理
-func (c *Cmd) Bytes(b []byte) {
+func (c *Cmd) AddBytes(b []byte) {
 	c.cmd++
 	// '$'
 	c.req = append(c.req, '$')
 	// length
-	c.req = strconv.AppendInt(c.req, int64(len(b)), 10)
+	n := int64(len(b))
+	c.req = strconv.AppendInt(c.req, n, 10)
 	// \r\n
 	c.req = append(c.req, endLine...)
+	if n < 1 {
+		return
+	}
 	// b
 	c.req = append(c.req, b...)
 	// \r\n
@@ -114,78 +115,83 @@ func (c *Cmd) Bytes(b []byte) {
 }
 
 // 格式化浮点数，作为字符串处理
-func (c *Cmd) Float(n float64) {
+func (c *Cmd) AddFloat(n float64) {
 	c.fmt = c.fmt[:0]
 	c.fmt = strconv.AppendFloat(c.fmt, n, 'f', -1, 64)
-	c.Bytes(c.fmt)
-	//c.cmd++
-	//// '$'
-	//c.req = append(c.req, '$')
-	//strconv.app
+	c.AddBytes(c.fmt)
 }
 
 // 编码一个对象
 // switch v.(type)
-// case intxx,uintxx: Int()
-// case string: String()
-// case floatxx: Float()
-// case []byte: Bytes()
-// default: Json
-func (c *Cmd) Value(v interface{}) error {
+// case intxx,uintxx: AddInt()
+// case string: AddString()
+// case floatxx: AddFloat()
+// case []byte: AddBytes()
+// case nil: AddNil()
+// default: AddJson()
+func (c *Cmd) AddValue(v interface{}) error {
 	c.cmd++
-	return c.value(v)
+	return c.addValue(v)
 }
 
-func (c *Cmd) value(v interface{}) (err error) {
+func (c *Cmd) addValue(v interface{}) (err error) {
+	if v == nil {
+		c.AddNil()
+		return nil
+	}
 	switch v.(type) {
 	case int8:
-		c.Int(int64(v.(int8)))
+		c.AddInt(int64(v.(int8)))
 	case uint8:
-		c.Int(int64(v.(uint8)))
+		c.AddInt(int64(v.(uint8)))
 	case int16:
-		c.Int(int64(v.(int16)))
+		c.AddInt(int64(v.(int16)))
 	case uint16:
-		c.Int(int64(v.(uint16)))
+		c.AddInt(int64(v.(uint16)))
 	case int32:
-		c.Int(int64(v.(int32)))
+		c.AddInt(int64(v.(int32)))
 	case uint32:
-		c.Int(int64(v.(uint32)))
+		c.AddInt(int64(v.(uint32)))
 	case int64:
-		c.Int(v.(int64))
+		c.AddInt(v.(int64))
 	case uint64:
-		c.Int(int64(v.(uint64)))
+		c.AddInt(int64(v.(uint64)))
 	case int:
-		c.Int(int64(v.(int)))
+		c.AddInt(int64(v.(int)))
 	case uint:
-		c.Int(int64(v.(uint)))
+		c.AddInt(int64(v.(uint)))
 	case float32:
-		c.Float(float64(v.(float32)))
+		c.AddFloat(float64(v.(float32)))
 	case float64:
-		c.Float(v.(float64))
+		c.AddFloat(v.(float64))
 	case string:
-		c.String(v.(string))
+		c.AddString(v.(string))
 	case []byte:
-		c.Bytes(v.([]byte))
+		c.AddBytes(v.([]byte))
 	case []interface{}:
-		err = c.Array(v.([]interface{}))
+		err = c.AddArray(v.([]interface{}))
 	default:
-		err = c.Json(v)
+		err = c.AddJson(v)
 	}
 	return
 }
 
 // 编码数组
-func (c *Cmd) Array(a []interface{}) (err error) {
+func (c *Cmd) AddArray(a []interface{}) (err error) {
 	c.cmd++
 	// '*'
 	c.req = append(c.req, '*')
 	// count
-	c.req = strconv.AppendInt(c.req, int64(len(a)), 10)
+	n := int64(len(a))
+	c.req = strconv.AppendInt(c.req, n, 10)
 	// \r\n
 	c.req = append(c.req, endLine...)
+	if n < 1 {
+		return
+	}
 	// item
 	for i := 0; i < len(a); i++ {
-		err = c.value(a[i])
+		err = c.addValue(a[i])
 		if err != nil {
 			break
 		}
@@ -194,20 +200,32 @@ func (c *Cmd) Array(a []interface{}) (err error) {
 }
 
 // 格式化json字符串，作为字符串处理
-func (c *Cmd) Json(v interface{}) error {
+func (c *Cmd) AddJson(v interface{}) error {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
-	c.Bytes(data)
+	c.AddBytes(data)
 	return nil
 }
 
+// 编码null对象
+func (c *Cmd) AddNil() {
+	c.cmd++
+	// '$'
+	c.req = append(c.req, '$')
+	// -1
+	c.req = strconv.AppendInt(c.req, -1, 10)
+	// \r\n
+	c.req = append(c.req, endLine...)
+}
+
 // 返回格式化的请求缓存
-func (c *Cmd) Cmd() []byte {
+func (c *Cmd) Data() []byte {
 	return c.req
 }
 
+// io.WriteTo
 func (c *Cmd) WriteTo(writer io.Writer) (int64, error) {
 	c.fmt = c.fmt[:0]
 	// '*'
@@ -227,9 +245,9 @@ func (c *Cmd) WriteTo(writer io.Writer) (int64, error) {
 }
 
 // 读取一个数据
-func (c *Cmd) ReadValue(reader io.Reader) (interface{}, error) {
+func (c *Cmd) readValue(r io.Reader) (interface{}, error) {
 	// 先读一行
-	line, err := c.readLine(reader)
+	line, err := c.readLine(r)
 	if err != nil {
 		return nil, err
 	}
@@ -248,7 +266,7 @@ func (c *Cmd) ReadValue(reader io.Reader) (interface{}, error) {
 			return "", nil
 		}
 		// 再读n+2个字节
-		line, err = c.readN(reader, n+2)
+		line, err = c.readN(r, n+2)
 		if err != nil {
 			return nil, err
 		}
@@ -260,7 +278,7 @@ func (c *Cmd) ReadValue(reader io.Reader) (interface{}, error) {
 		}
 		var values []interface{}
 		for i := 0; i < int(count); i++ {
-			value, err := c.ReadValue(reader)
+			value, err := c.readValue(r)
 			if err != nil {
 				return nil, err
 			}
@@ -272,8 +290,8 @@ func (c *Cmd) ReadValue(reader io.Reader) (interface{}, error) {
 	}
 }
 
-// 从reader，或者this.res中，读取1行...\r\n
-func (c *Cmd) readLine(reader io.Reader) ([]byte, error) {
+// 从r，或者this.res中，读取1行...\r\n
+func (c *Cmd) readLine(r io.Reader) ([]byte, error) {
 	var n, i int
 	var err error
 	// 是否有未处理的数据
@@ -296,7 +314,7 @@ func (c *Cmd) readLine(reader io.Reader) ([]byte, error) {
 	// 开始
 	for {
 		// 读数据
-		n, err = reader.Read(c.buf[:])
+		n, err = r.Read(c.buf[:])
 		if err != nil {
 			return nil, err
 		}
@@ -322,8 +340,8 @@ func (c *Cmd) readLine(reader io.Reader) ([]byte, error) {
 	}
 }
 
-// 从reader，或者this.res中，读取n个字节
-func (c *Cmd) readN(reader io.Reader, m int64) ([]byte, error) {
+// 从r，或者this.res中，读取n个字节
+func (c *Cmd) readN(r io.Reader, m int64) ([]byte, error) {
 	var n int
 	var err error
 	// 是否有未处理的数据
@@ -345,7 +363,7 @@ func (c *Cmd) readN(reader io.Reader, m int64) ([]byte, error) {
 	// 开始
 	for {
 		// 读数据
-		n, err = reader.Read(c.buf[:])
+		n, err = r.Read(c.buf[:])
 		if err != nil {
 			return nil, err
 		}

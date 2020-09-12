@@ -35,7 +35,7 @@ type Client struct {
 func (c *Client) NewCmd(cmd ...string) *Cmd {
 	_cmd := getCmd()
 	for i := 0; i < len(cmd); i++ {
-		_cmd.String(cmd[i])
+		_cmd.AddString(cmd[i])
 	}
 	return _cmd
 }
@@ -80,7 +80,7 @@ func (c *Client) DoCmd(cmd *Cmd) (value interface{}, err error) {
 		// 读取，解析，返回响应数据
 		cmd.res = cmd.res[:0]
 		cmd.idx = 0
-		value, err = cmd.ReadValue(conn)
+		value, err = cmd.readValue(conn)
 		if err != nil {
 			c.onNetError(conn, cmd, err)
 			return
@@ -89,12 +89,6 @@ func (c *Client) DoCmd(cmd *Cmd) (value interface{}, err error) {
 	putCmd(cmd)
 	c.putConn(conn)
 	return
-}
-
-// 执行命令
-func (c *Client) Do(cmd ...string) (value interface{}, err error) {
-	_cmd := c.NewCmd(cmd...)
-	return c.DoCmd(_cmd)
 }
 
 // 关闭
