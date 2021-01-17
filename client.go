@@ -51,6 +51,11 @@ func parseInt(b []byte) (int64, error) {
 	return n, nil
 }
 
+// dial，创建连接的函数。
+// db，Client选择的库的索引，1，2，3。
+// max，连接池的最大连接数，默认是1。
+// rto，ReadDealLine，0表示永不超时。
+// wto，WriteDealLine，0表示永不超时。
 func NewClient(dial func() (net.Conn, error), db, max int, rto, wto time.Duration) *Client {
 	p := new(Client)
 	p.cond = sync.NewCond(new(sync.Mutex))
