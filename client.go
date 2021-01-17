@@ -75,6 +75,12 @@ func NewClient(dial func() (net.Conn, error), db, max int, rto, wto time.Duratio
 	return p
 }
 
+type Error string
+
+func (e Error) Error() string {
+	return string(e)
+}
+
 type conn struct {
 	net.Conn // 底层连接
 	buffer   // 缓存
@@ -259,9 +265,9 @@ func (c *Client) readValue(conn *conn) (interface{}, error) {
 	case '+': // 简单字符串
 		return string(line[1 : len(line)-2]), nil
 	case '-': // 错误
-		return nil, errors.New(string(line[1:]))
+		return nil, Error(line[1 : len(line)-2])
 	case ':': // 整数
-		return parseInt(line[1:])
+		return parseInt(line[1 : len(line)-2])
 	case '$': // 字符串
 		var length int64 // 长度
 		length, err = parseInt(line[1 : len(line)-2])
@@ -293,7 +299,7 @@ func (c *Client) readValue(conn *conn) (interface{}, error) {
 		if !ok {
 			return nil, errReadString
 		}
-		return string(line[1 : len(line)-2]), nil
+		return string(line[:len(line)-2]), nil
 	case '*': // 数组
 		var count int64 // 个数
 		count, err = parseInt(line[1 : len(line)-2])
