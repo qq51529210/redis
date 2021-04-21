@@ -63,7 +63,7 @@ func NewClient(dial func() (net.Conn, error), db, max int, rto, wto time.Duratio
 	p.dial = dial
 	if p.dial == nil {
 		p.dial = func() (net.Conn, error) {
-			return net.Dial("tcp", "127.0.0.1:6379")
+			return net.Dial("tcp", "localhost:6379")
 		}
 	}
 	p.db = maxInt(db, 0)
@@ -149,6 +149,7 @@ func (c *Client) Do(args ...interface{}) (interface{}, error) {
 	return val, nil
 }
 
+// 检查conn.Conn是否有效的连接，如果不是，则新建立，然后选择库
 func (c *Client) check(conn *conn) error {
 	if conn.Conn != nil {
 		return nil
@@ -179,6 +180,7 @@ func (c *Client) check(conn *conn) error {
 	return nil
 }
 
+// 获取可用的conn
 func (c *Client) getConn() (*conn, error) {
 	c.cond.L.Lock()
 	for c.ok {
@@ -205,6 +207,7 @@ func (c *Client) getConn() (*conn, error) {
 	return nil, errClosed
 }
 
+// 回收conn
 func (c *Client) putConn(conn *conn) {
 	c.cond.L.Lock()
 	if c.ok {
@@ -217,18 +220,16 @@ func (c *Client) putConn(conn *conn) {
 	c.cond.L.Unlock()
 }
 
+// 错误关闭net.Conn，回收conn
 func (c *Client) onError(conn *conn, err error) {
-	if netErr, ok := err.(net.Error); ok &&
-		!netErr.Timeout() && !netErr.Temporary() {
-		if conn.Conn != nil {
-			_ = conn.Conn.Close()
-			conn.Conn = nil
-		}
+	if conn.Conn != nil {
+		_ = conn.Conn.Close()
+		conn.Conn = nil
 	}
-	// 回收
 	c.putConn(conn)
 }
 
+// 将conn.buffer的数据发送到conn.Conn
 func (c *Client) write(conn *conn) (err error) {
 	// 设置超时
 	if c.wto > 0 {
@@ -242,6 +243,7 @@ func (c *Client) write(conn *conn) (err error) {
 	return
 }
 
+// 从conn.Conn读取并解析数据，返回
 func (c *Client) read(conn *conn) (interface{}, error) {
 	// 设置超时
 	if c.rto > 0 {
@@ -255,6 +257,7 @@ func (c *Client) read(conn *conn) (interface{}, error) {
 	return c.readValue(conn)
 }
 
+// 解析redis的通信协议
 func (c *Client) readValue(conn *conn) (interface{}, error) {
 	line, err := c.readLine(conn)
 	if err != nil {
@@ -322,6 +325,7 @@ func (c *Client) readValue(conn *conn) (interface{}, error) {
 	}
 }
 
+// 读取conn.buffer中的一行数据
 func (c *Client) readLine(conn *conn) ([]byte, error) {
 	b, o := conn.ReadLine()
 	if o {
