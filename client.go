@@ -23,14 +23,12 @@ type Client struct {
 	host string
 	// Index of db,every command will use this db.
 	dbIndex int
-	// IO read timeout.
+	// IO read timeout,millisecond.
 	readTimeout time.Duration
-	// IO write timeout.
+	// IO write timeout,millisecond.
 	writeTimeout time.Duration
 	// Connection pool.
 	connPool []*conn
-	// Command buffer initial size.
-	connBuffer int
 }
 
 // Init data for NewClient().
@@ -45,8 +43,6 @@ type ClientConfig struct {
 	ReadTimeout int `json:"readTimeout"`
 	// IO write timeout,millisecond.
 	WriteTimeout int `json:"writeTimeout"`
-	// Command buffer initial size.
-	ConnBuffer int `json:"connBuffer"`
 }
 
 // Create a redis command client. If arg newConn is nil,use net.Dial() instead.
@@ -103,7 +99,8 @@ func (c *Client) Close() error {
 }
 
 // Write command to server,and read response from server.
-// Example: value, err := Client.Cmd("set", "test", "ok").
+// Example: Client.Cmd("set", "test", "ok").
+// If cmd is struct,it will convert to json string.
 // Return value data type could be one of [nil, string, int64, []interface{}].
 // Return error could be network error or server error message.
 func (c *Client) Cmd(cmd ...interface{}) (interface{}, error) {
