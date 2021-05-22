@@ -9,7 +9,6 @@ import (
 
 var (
 	errClosedClient = errors.New("client has been closed")
-	errReadString   = errors.New("read string from server error")
 )
 
 // Redis command client with connection pool.
@@ -33,7 +32,7 @@ type Client struct {
 
 // Init data for NewClient().
 type ClientConfig struct {
-	// Redis server listen address.Default is DefaultHost
+	// Redis server listen address,it will pass to newConn().Default is "localhost:6379"
 	Host string `json:"host"`
 	// Index of db which every command whill choose.
 	DB int `json:"db"`
@@ -46,17 +45,7 @@ type ClientConfig struct {
 }
 
 // Create a redis command client. If arg newConn is nil,use net.Dial() instead.
-func NewClient(newConn func(string) (net.Conn, error), cfg *ClientConfig) (*Client, error) {
-	// Check cfg.Host value.
-	host := cfg.Host
-	if host == "" {
-		host = "localhost:6379"
-	} else {
-		_, err := net.ResolveTCPAddr("tcp", host)
-		if err != nil {
-			return nil, err
-		}
-	}
+func NewClient(newConn func(string) (net.Conn, error), cfg *ClientConfig) *Client {
 	// Create and initialize.
 	c := new(Client)
 	c.cond = sync.NewCond(new(sync.Mutex))
@@ -67,7 +56,10 @@ func NewClient(newConn func(string) (net.Conn, error), cfg *ClientConfig) (*Clie
 			return net.Dial("tcp", host)
 		}
 	}
-	c.host = host
+	c.host = cfg.Host
+	if c.host == "" {
+		c.host = "localhost:6379"
+	}
 	c.dbIndex = maxInt(cfg.DB, 0)
 	c.readTimeout = time.Duration(maxInt(cfg.ReadTimeout, 0)) * time.Millisecond
 	c.writeTimeout = time.Duration(maxInt(cfg.WriteTimeout, 0)) * time.Millisecond
@@ -76,7 +68,7 @@ func NewClient(newConn func(string) (net.Conn, error), cfg *ClientConfig) (*Clie
 		c.connPool[i] = new(conn)
 		c.connPool[i].free = true
 	}
-	return c, nil
+	return c
 }
 
 // Close this client,and all net.Conn.
