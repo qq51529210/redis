@@ -1,19 +1,22 @@
 # redis-client
+
 A redis client package written in Golang.
+
 ## Example
+
+[Details code](./redis_test.go)
 
 ```go
 import "github.com/qq51529210/redis"
 
 // Create a new client
-client, err := redis.NewClient(nil, &ClientConfig{
+client := redis.NewClient(nil, &ClientConfig{
   Host: "",
   DB: 1,
   MaxConn: 10,
   ReadTimeout: 3000,
   WriteTimeout: 3000,
 })
-checkError(err)
 
 // Command "set a 1",but integer 1 will convert to string "1".
 value, err := client.Cmd("set", "a", 1)
@@ -28,7 +31,7 @@ value, err = client.Cmd("set", "c", &struct{})
 checkError(err)
 
 // Set array.
-value, err = client.Cmd("set", "d", []interface{1, "2", 3.3})
+value, err = client.Cmd("set", "d", []interface{}{1, "1", 1.1})
 checkError(err)
 
 // Command "get a",value is string "1" not integer 1!
@@ -43,7 +46,7 @@ checkError(err)
 value, err = client.Cmd("get", "c")
 checkError(err)
 
-// Command "get d",value is []interface{}
+// Command "get d",value is []interface{}{}
 value, err = client.Cmd("get", "d")
 checkError(err)
 
