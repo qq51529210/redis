@@ -2,347 +2,231 @@ package redis
 
 import (
 	"errors"
-	"fmt"
 	"net"
 	"sync"
 	"time"
 )
 
 var (
-	errClosed         = errors.New("client has been closed")
-	errReadString     = errors.New("read string from server error")
-	DefaultBufferSize = 128
+	errClosedClient = errors.New("client has been closed")
+	errReadString   = errors.New("read string from server error")
 )
 
-// 返回最大的
-func maxInt(i1, i2 int) int {
-	if i1 > i2 {
-		return i1
-	}
-	return i2
-}
-
-// 解析整数
-func parseInt(b []byte) (int64, error) {
-	var n int64
-	if len(b) > 0 {
-		i := 0
-		if b[i] == '-' {
-			i++
-		}
-		if '0' <= b[i] && b[i] <= '9' {
-			n = int64(b[i] - '0')
-			i++
-		} else {
-			return n, fmt.Errorf("parse int invalid <%q>", b[i])
-		}
-		for ; i < len(b); i++ {
-			if '0' <= b[i] && b[i] <= '9' {
-				n *= 10
-				n += int64(b[i] - '0')
-			} else {
-				return n, fmt.Errorf("parse int invalid <%q>", b[i])
-			}
-		}
-		if b[0] == '-' {
-			n = 0 - n
-		}
-	}
-	return n, nil
-}
-
-// dial，创建连接的函数。
-// db，Client选择的库的索引，1，2，3。
-// max，连接池的最大连接数，默认是1。
-// rto，ReadDealLine，0表示永不超时。
-// wto，WriteDealLine，0表示永不超时。
-func NewClient(dial func() (net.Conn, error), db, max int, rto, wto time.Duration) *Client {
-	p := new(Client)
-	p.cond = sync.NewCond(new(sync.Mutex))
-	p.ok = true
-	p.dial = dial
-	if p.dial == nil {
-		p.dial = func() (net.Conn, error) {
-			return net.Dial("tcp", "localhost:6379")
-		}
-	}
-	p.db = maxInt(db, 0)
-	p.rto = rto
-	p.wto = wto
-	max = maxInt(max, 1)
-	p.free = make([]*conn, 0)
-	p.all = make([]*conn, 0, max)
-	return p
-}
-
-type Error string
-
-func (e Error) Error() string {
-	return string(e)
-}
-
-type conn struct {
-	net.Conn // 底层连接
-	buffer   // 缓存
-}
-
-// 带连接池的客户端
+// Redis command client with connection pool.
 type Client struct {
 	cond *sync.Cond
-	db   int                      // 对应的库的索引
-	ok   bool                     // 是否有效
-	dial func() (net.Conn, error) // 获取底层连接函数
-	rto  time.Duration            // io读超时
-	wto  time.Duration            // io写超时
-	free []*conn                  // 当前空闲可用的连接
-	all  []*conn                  // 保存所有的连接
+	// Whether this client is valid.
+	ok bool
+	// Use for create a new net.Conn.
+	newConn func(string) (net.Conn, error)
+	// Server address.
+	host string
+	// Index of db,every command will use this db.
+	dbIndex int
+	// IO read timeout.
+	readTimeout time.Duration
+	// IO write timeout.
+	writeTimeout time.Duration
+	// Connection pool.
+	connPool []*conn
+	// Command buffer initial size.
+	connBuffer int
 }
 
-// 关闭
+// Init data for NewClient().
+type ClientConfig struct {
+	// Redis server listen address.Default is DefaultHost
+	Host string `json:"host"`
+	// Index of db which every command whill choose.
+	DB int `json:"db"`
+	// Maximum connections.
+	MaxConn int `json:"maxConn"`
+	// IO read timeout,millisecond.
+	ReadTimeout int `json:"readTimeout"`
+	// IO write timeout,millisecond.
+	WriteTimeout int `json:"writeTimeout"`
+	// Command buffer initial size.
+	ConnBuffer int `json:"connBuffer"`
+}
+
+// Create a redis command client. If arg newConn is nil,use net.Dial() instead.
+func NewClient(newConn func(string) (net.Conn, error), cfg *ClientConfig) (*Client, error) {
+	// Check cfg.Host value.
+	host := cfg.Host
+	if host == "" {
+		host = "localhost:6379"
+	} else {
+		_, err := net.ResolveTCPAddr("tcp", host)
+		if err != nil {
+			return nil, err
+		}
+	}
+	// Create and initialize.
+	c := new(Client)
+	c.cond = sync.NewCond(new(sync.Mutex))
+	c.ok = true
+	c.newConn = newConn
+	if c.newConn == nil {
+		c.newConn = func(host string) (net.Conn, error) {
+			return net.Dial("tcp", host)
+		}
+	}
+	c.host = host
+	c.dbIndex = maxInt(cfg.DB, 0)
+	c.readTimeout = time.Duration(maxInt(cfg.ReadTimeout, 0)) * time.Millisecond
+	c.writeTimeout = time.Duration(maxInt(cfg.WriteTimeout, 0)) * time.Millisecond
+	c.connPool = make([]*conn, maxInt(cfg.MaxConn, 1))
+	for i := 0; i < len(c.connPool); i++ {
+		c.connPool[i] = new(conn)
+		c.connPool[i].free = true
+	}
+	return c, nil
+}
+
+// Close this client,and all net.Conn.
 func (c *Client) Close() error {
-	// 改变状态
+	// Change to closed state.
 	c.cond.L.Lock()
 	if !c.ok {
 		c.cond.L.Unlock()
-		return errClosed
+		return errClosedClient
 	}
 	c.ok = false
 	c.cond.L.Unlock()
-	// 关闭所有连接
-	for i := 0; i < len(c.all); i++ {
-		if c.all[i].Conn != nil {
-			_ = c.all[i].Close()
+	// Close all net.Conn.
+	for i := 0; i < len(c.connPool); i++ {
+		if c.connPool[i].Conn != nil {
+			c.connPool[i].Close()
 		}
 	}
 	return nil
 }
 
-// 发送命令，并获取结果
-func (c *Client) Do(args ...interface{}) (interface{}, error) {
-	// 获取conn
+// Write command to server,and read response from server.
+// Example: value, err := Client.Cmd("set", "test", "ok").
+// Return value data type could be one of [nil, string, int64, []interface{}].
+// Return error could be network error or server error message.
+func (c *Client) Cmd(cmd ...interface{}) (interface{}, error) {
+	// Get free conn.
 	conn, err := c.getConn()
 	if err != nil {
-		c.onError(conn, err)
+		c.onConnError(conn, err)
 		return nil, err
 	}
-	// 写入命令
-	conn.CmdCount(int64(len(args)))
-	for _, a := range args {
-		conn.Value(a)
+	// Step 1: write command count into buffer.
+	conn.WriteCmdCount(int64(len(cmd)))
+	for _, a := range cmd {
+		// Step 2: write command into buffer.
+		conn.WriteValue(a)
 	}
-	// 请求
-	err = c.write(conn)
+	// Write buffer to server.
+	err = c.writeRequest(conn)
 	if err != nil {
-		c.onError(conn, err)
+		c.onConnError(conn, err)
 		return nil, err
 	}
-	// 相应
+	// Read and parse response.
 	var val interface{}
-	val, err = c.read(conn)
+	val, err = c.readResponse(conn)
 	if err != nil {
-		c.onError(conn, err)
+		c.onConnError(conn, err)
 		return nil, err
 	}
-	// 回收
+	// Free conn.
 	c.putConn(conn)
-	// 返回
 	return val, nil
 }
 
-// 检查conn.Conn是否有效的连接，如果不是，则新建立，然后选择库
-func (c *Client) check(conn *conn) error {
-	if conn.Conn != nil {
-		return nil
-	}
-	// 建立连接
-	var err error
-	conn.Conn, err = c.dial()
-	if err != nil {
-		return err
-	}
-	// 选择库
-	if c.db > 0 {
-		conn.CmdCount(2)
-		conn.String("select")
-		conn.Int(int64(c.db))
-		// 发送
-		_, err = conn.Write(conn.buf)
-		if err != nil {
-			return err
-		}
-		// 读取"OK"
-		_, err = c.read(conn)
-		if err != nil {
-			return err
-		}
-		conn.buf = conn.buf[:0]
-	}
-	return nil
-}
-
-// 获取可用的conn
+// Get free conn from pool.
 func (c *Client) getConn() (*conn, error) {
+	// Lock and block this routinue.
 	c.cond.L.Lock()
 	for c.ok {
-		// 是否有可用的连接
-		if len(c.free) > 0 {
-			n := len(c.free) - 1
-			conn := c.free[n]
-			c.free = c.free[:n]
-			c.cond.L.Unlock()
-			return conn, c.check(conn)
+		// Check free conn.
+		for _, conn := range c.connPool {
+			if conn.free {
+				conn.free = false
+				c.cond.L.Unlock()
+				return conn, c.checkConn(conn)
+			}
 		}
-		// 是否达到了最大的连接
-		if len(c.all) < cap(c.all) {
-			conn := new(conn)
-			conn.buf = make([]byte, DefaultBufferSize)
-			c.all = append(c.all, conn)
-			c.cond.L.Unlock()
-			return conn, c.check(conn)
-		}
-		// 等待空闲的
+		// There is no free conn,wait for free one.
 		c.cond.Wait()
 	}
 	c.cond.L.Unlock()
-	return nil, errClosed
+	// Client has been closed.
+	return nil, errClosedClient
 }
 
-// 回收conn
+// Put conn into pool.
 func (c *Client) putConn(conn *conn) {
 	c.cond.L.Lock()
 	if c.ok {
-		c.free = append(c.free, conn)
+		conn.free = true
 		c.cond.L.Unlock()
-		// 通知getConn()有新的可用conn
+		// Notify other routine,there's a free conn.
 		c.cond.Signal()
 		return
 	}
 	c.cond.L.Unlock()
 }
 
-// 错误关闭net.Conn，回收conn
-func (c *Client) onError(conn *conn, err error) {
+// If net.Conn is nil,create a new one and select db.
+func (c *Client) checkConn(conn *conn) (err error) {
+	// If net.Conn is invalid,create a new one.
 	if conn.Conn != nil {
-		_ = conn.Conn.Close()
+		return nil
+	}
+	conn.Conn, err = c.newConn(c.host)
+	if err != nil {
+		return err
+	}
+	// Chose db,becase redis default db is 0,so write command when db>0.
+	if c.dbIndex > 0 {
+		// "select x"
+		conn.WriteCmdCount(2)
+		conn.WriteString("select")
+		conn.WriteInt(int64(c.dbIndex))
+		_, err = conn.Conn.Write(conn.buff)
+		if err != nil {
+			return err
+		}
+		// "+OK" or "-Error message"
+		_, err = conn.ReadValue()
+	}
+	return err
+}
+
+// If there's any error,free conn.
+func (c *Client) onConnError(conn *conn, err error) {
+	if conn.Conn != nil {
+		conn.Conn.Close()
 		conn.Conn = nil
 	}
 	c.putConn(conn)
 }
 
-// 将conn.buffer的数据发送到conn.Conn
-func (c *Client) write(conn *conn) (err error) {
-	// 设置超时
-	if c.wto > 0 {
-		err = conn.SetWriteDeadline(time.Now().Add(c.wto))
+// Write conn buffer to server.
+func (c *Client) writeRequest(conn *conn) (err error) {
+	// If c.writeTimeout was set.
+	if c.writeTimeout > 0 {
+		err = conn.Conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
 		if err != nil {
 			return
 		}
 	}
-	// 发送
-	_, err = conn.Write(conn.buf)
+	_, err = conn.Conn.Write(conn.buff)
 	return
 }
 
-// 从conn.Conn读取并解析数据，返回
-func (c *Client) read(conn *conn) (interface{}, error) {
-	// 设置超时
-	if c.rto > 0 {
-		err := conn.SetReadDeadline(time.Now().Add(c.rto))
+// Read and parse result.
+func (c *Client) readResponse(conn *conn) (interface{}, error) {
+	// If c.readTimeout was set.
+	if c.readTimeout > 0 {
+		err := conn.Conn.SetReadDeadline(time.Now().Add(c.readTimeout))
 		if err != nil {
 			return nil, err
 		}
 	}
-	// 读取，解析，返回响应数据
-	conn.i1, conn.i2, conn.len = 0, 0, 0
-	return c.readValue(conn)
-}
-
-// 解析redis的通信协议
-func (c *Client) readValue(conn *conn) (interface{}, error) {
-	line, err := c.readLine(conn)
-	if err != nil {
-		return nil, err
-	}
-	// 数据类型
-	switch line[0] {
-	case '+': // 简单字符串
-		return string(line[1 : len(line)-2]), nil
-	case '-': // 错误
-		return nil, Error(line[1 : len(line)-2])
-	case ':': // 整数
-		return parseInt(line[1 : len(line)-2])
-	case '$': // 字符串
-		var length int64 // 长度
-		length, err = parseInt(line[1 : len(line)-2])
-		if err != nil {
-			return nil, err
-		}
-		// nil对象
-		if length < 0 {
-			return nil, nil
-		}
-		// 再读n+2("\r\n")个字节
-		length += 2
-		if conn.len-conn.i2 < int(length) {
-			var n int
-			for length > 0 {
-				n, err = conn.Conn.Read(conn.buf[conn.len:])
-				if err != nil {
-					return nil, err
-				}
-				conn.len += n
-				length -= int64(n)
-				if conn.len == len(conn.buf) {
-					conn.resize()
-				}
-			}
-		}
-		var ok bool
-		line, ok = conn.ReadLine()
-		if !ok {
-			return nil, errReadString
-		}
-		return string(line[:len(line)-2]), nil
-	case '*': // 数组
-		var count int64 // 个数
-		count, err = parseInt(line[1 : len(line)-2])
-		if err != nil {
-			return nil, err
-		}
-		var array []interface{}
-		// 读取元素
-		for i := int64(0); i < count; i++ {
-			var a interface{}
-			a, err = c.readValue(conn)
-			if err != nil {
-				return nil, err
-			}
-			array = append(array, a)
-		}
-		return array, nil
-	default:
-		return nil, fmt.Errorf("invalid data type <%q> from server", conn.buf[0])
-	}
-}
-
-// 读取conn.buffer中的一行数据
-func (c *Client) readLine(conn *conn) ([]byte, error) {
-	b, o := conn.ReadLine()
-	if o {
-		return b, nil
-	}
-	// 读数据
-	var err error
-	var n int
-	for {
-		n, err = conn.Conn.Read(conn.buf[conn.len:])
-		if err != nil {
-			return nil, err
-		}
-		conn.len += n
-		b, o = conn.ReadLine()
-		if o {
-			return b, nil
-		}
-	}
+	return conn.ReadValue()
 }
