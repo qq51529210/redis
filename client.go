@@ -120,45 +120,15 @@ func (c *Client) Cmd(args ...interface{}) (interface{}, error) {
 		c.onConnError(conn, err)
 		return nil, err
 	}
-	// Step 1: write command count into buffer.
-	conn.WriteCount(int64(len(args)))
-	for _, a := range args {
-		// Step 2: write command into buffer.
-		conn.WriteValue(a)
-	}
-	// If c.writeTimeout was set.
-	if c.writeTimeout > 0 {
-		err = conn.Conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
-		if err != nil {
-			c.onConnError(conn, err)
-			return nil, err
-		}
-	}
-	// Write buffer to server.
-	_, err = conn.Conn.Write(conn.buff)
-	if err != nil {
-		c.onConnError(conn, err)
-		return nil, err
-	}
-	// If c.readTimeout was set.
-	if c.readTimeout > 0 {
-		err := conn.Conn.SetReadDeadline(time.Now().Add(c.readTimeout))
-		if err != nil {
-			return nil, err
-		}
-	}
-	// Read and parse response.
-	conn.newLineIdx, conn.parsedIdx, conn.resLenIdx = 0, 0, 0
-	conn.buff = conn.buff[:cap(conn.buff)]
-	var val interface{}
-	val, err = conn.ReadValue()
+	var value interface{}
+	value, err = c.writeCmd(conn, "select", c.dbIndex)
 	if err != nil {
 		c.onConnError(conn, err)
 		return nil, err
 	}
 	// Free conn.
 	c.putConn(conn)
-	return val, nil
+	return value, nil
 }
 
 // Get free conn from pool.
@@ -205,18 +175,9 @@ func (c *Client) checkConn(conn *conn) (err error) {
 	if err != nil {
 		return err
 	}
-	// Chose db,becase redis default db is 0,so write command when db>0.
+	// Select db,becase redis default db is 0,so write command when db>0.
 	if c.dbIndex > 0 {
-		// "select x"
-		conn.WriteCount(2)
-		conn.WriteString("select")
-		conn.WriteInt(int64(c.dbIndex))
-		_, err = conn.Conn.Write(conn.buff)
-		if err != nil {
-			return err
-		}
-		// "+OK" or "-Error message"
-		_, err = conn.ReadValue()
+		_, err = c.writeCmd(conn, "select", c.dbIndex)
 	}
 	return err
 }
@@ -228,4 +189,42 @@ func (c *Client) onConnError(conn *conn, err error) {
 		conn.Conn = nil
 	}
 	c.putConn(conn)
+}
+
+func (c *Client) writeCmd(conn *conn, args ...interface{}) (interface{}, error) {
+	// Step 1: write command count into buffer.
+	conn.WriteCount(int64(len(args)))
+	for _, a := range args {
+		// Step 2: write command into buffer.
+		conn.WriteValue(a)
+	}
+	var err error
+	// If c.writeTimeout was set.
+	if c.writeTimeout > 0 {
+		err = conn.Conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
+		if err != nil {
+			return nil, err
+		}
+	}
+	// Write buffer to server.
+	_, err = conn.Conn.Write(conn.buff)
+	if err != nil {
+		return nil, err
+	}
+	// If c.readTimeout was set.
+	if c.readTimeout > 0 {
+		err := conn.Conn.SetReadDeadline(time.Now().Add(c.readTimeout))
+		if err != nil {
+			return nil, err
+		}
+	}
+	// Read and parse response.
+	conn.newLineIdx, conn.parsedIdx, conn.resLenIdx = 0, 0, 0
+	conn.buff = conn.buff[:cap(conn.buff)]
+	var value interface{}
+	value, err = conn.ReadValue()
+	if err != nil {
+		return nil, err
+	}
+	return value, err
 }

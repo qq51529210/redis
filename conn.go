@@ -279,7 +279,7 @@ func (c *conn) tryReadLine() ([]byte, bool) {
 }
 
 // Read n characters
-func (c *conn) ReadN(n int) ([]byte, error) {
+func (c *conn) readN(n int) ([]byte, error) {
 	dataLen := c.resLenIdx - c.newLineIdx
 	// If has enough data.
 	if dataLen < n {
@@ -304,7 +304,8 @@ func (c *conn) ReadN(n int) ([]byte, error) {
 			}
 		}
 		// Read from net.Conn
-		m, err := io.ReadAtLeast(c.Conn, c.buff[c.resLenIdx:], dataLeft)
+		var err error
+		m, err = io.ReadAtLeast(c.Conn, c.buff[c.resLenIdx:], dataLeft)
 		if err != nil {
 			return nil, err
 		}
