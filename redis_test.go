@@ -3,6 +3,7 @@ package redis
 import (
 	"encoding/json"
 	"net"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -12,20 +13,26 @@ func Test_Client(t *testing.T) {
 		Host:         "192.168.1.14:6379",
 		DB:           1,
 		MaxConn:      10,
-		ReadTimeout:  3000,
-		WriteTimeout: 3000,
+		ReadTimeout:  0,
+		WriteTimeout: 0,
 	}
 	// Create a new Client
 	client := NewClient(func(address string) (net.Conn, error) {
 		return net.DialTimeout("tcp", address, time.Second)
 	}, cfg)
+	var (
+		value interface{}
+		err   error
+		str   string
+		ok    bool
+	)
 	// set a 1
-	value, err := client.Cmd("set", "a", 1)
+	value, err = client.Cmd("set", "a", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	str, ok := value.(string)
-	if !ok || str != "ok" {
+	str, ok = value.(string)
+	if !ok || str != "OK" {
 		t.FailNow()
 	}
 	// set b 1.1
@@ -34,7 +41,7 @@ func Test_Client(t *testing.T) {
 		t.Fatal(err)
 	}
 	str, ok = value.(string)
-	if !ok || str != "ok" {
+	if !ok || str != "OK" {
 		t.FailNow()
 	}
 	// set c cfg
@@ -43,17 +50,17 @@ func Test_Client(t *testing.T) {
 		t.Fatal(err)
 	}
 	str, ok = value.(string)
-	if !ok || str != "ok" {
+	if !ok || str != "OK" {
 		t.FailNow()
 	}
 	// set d []interface{}{1, "1", 1.1}
-	array := []interface{}{1, "1", 1.1}
+	array := []interface{}{1, "2", 3.3}
 	value, err = client.Cmd("set", "d", array)
 	if err != nil {
 		t.Fatal(err)
 	}
 	str, ok = value.(string)
-	if !ok || str != "ok" {
+	if !ok || str != "OK" {
 		t.FailNow()
 	}
 	// get a
@@ -106,16 +113,22 @@ func Test_Client(t *testing.T) {
 	if len(newArray) != len(array) {
 		t.FailNow()
 	}
-	item1, ok := newArray[0].(int64)
-	if !ok || item1 != int64(array[0].(int)) {
+	if str, ok = newArray[0].(string); !ok || str != strconv.FormatInt(int64(array[0].(int)), 64) {
 		t.FailNow()
 	}
-	item2, ok := newArray[1].(string)
-	if !ok || item2 != array[1].(string) {
+	if str, ok = newArray[1].(string); !ok || str != array[1].(string) {
 		t.FailNow()
 	}
-	item3, ok := newArray[2].(float64)
-	if !ok || item3 != array[2].(float64) {
+	if str, ok = newArray[1].(string); !ok || str != strconv.FormatInt(int64(array[0].(int)), 64) {
+		t.FailNow()
+	}
+
+	value, err = client.Cmd("lpush", "l", "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok = value.(string)
+	if !ok || str != "OK" {
 		t.FailNow()
 	}
 }

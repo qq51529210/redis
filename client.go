@@ -46,24 +46,43 @@ type ClientConfig struct {
 
 // Create a redis command client. If arg newConn is nil,use net.Dial() instead.
 func NewClient(newConn func(string) (net.Conn, error), cfg *ClientConfig) *Client {
-	// Create and initialize.
 	c := new(Client)
 	c.cond = sync.NewCond(new(sync.Mutex))
 	c.ok = true
-	c.newConn = newConn
-	if c.newConn == nil {
+	// Function newConn
+	if newConn == nil {
 		c.newConn = func(host string) (net.Conn, error) {
 			return net.Dial("tcp", host)
 		}
+	} else {
+		c.newConn = newConn
 	}
+	// Host
 	c.host = cfg.Host
 	if c.host == "" {
 		c.host = "localhost:6379"
 	}
-	c.dbIndex = maxInt(cfg.DB, 0)
-	c.readTimeout = time.Duration(maxInt(cfg.ReadTimeout, 0)) * time.Millisecond
-	c.writeTimeout = time.Duration(maxInt(cfg.WriteTimeout, 0)) * time.Millisecond
-	c.connPool = make([]*conn, maxInt(cfg.MaxConn, 1))
+	// DB
+	if cfg.DB > 0 {
+		c.dbIndex = cfg.DB
+	}
+	// ReadTimeout
+	if cfg.ReadTimeout > 0 {
+		c.readTimeout = time.Duration(cfg.ReadTimeout)
+	}
+	c.readTimeout *= time.Millisecond
+	// WriteTimeout
+	if cfg.WriteTimeout > 0 {
+		c.writeTimeout = time.Duration(cfg.WriteTimeout)
+	}
+	c.writeTimeout *= time.Millisecond
+	// MaxConn
+	if cfg.MaxConn < 0 {
+		c.connPool = make([]*conn, 1)
+	} else {
+		c.connPool = make([]*conn, cfg.MaxConn)
+	}
+	// Init conn pool.
 	for i := 0; i < len(c.connPool); i++ {
 		c.connPool[i] = new(conn)
 		c.connPool[i].free = true
@@ -92,10 +111,9 @@ func (c *Client) Close() error {
 
 // Write command to server,and read response from server.
 // Example: Client.Cmd("set", "test", "ok").
-// If cmd is struct,it will convert to json string.
-// Return value data type could be one of [nil, string, int64, []interface{}].
+// Return value data type could be one of [nil, string, int64, []string].
 // Return error could be network error or server error message.
-func (c *Client) Cmd(cmd ...interface{}) (interface{}, error) {
+func (c *Client) Cmd(args ...interface{}) (interface{}, error) {
 	// Get free conn.
 	conn, err := c.getConn()
 	if err != nil {
@@ -103,20 +121,37 @@ func (c *Client) Cmd(cmd ...interface{}) (interface{}, error) {
 		return nil, err
 	}
 	// Step 1: write command count into buffer.
-	conn.WriteCmdCount(int64(len(cmd)))
-	for _, a := range cmd {
+	conn.WriteCount(int64(len(args)))
+	for _, a := range args {
 		// Step 2: write command into buffer.
 		conn.WriteValue(a)
 	}
+	// If c.writeTimeout was set.
+	if c.writeTimeout > 0 {
+		err = conn.Conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
+		if err != nil {
+			c.onConnError(conn, err)
+			return nil, err
+		}
+	}
 	// Write buffer to server.
-	err = c.writeRequest(conn)
+	_, err = conn.Conn.Write(conn.buff)
 	if err != nil {
 		c.onConnError(conn, err)
 		return nil, err
 	}
+	// If c.readTimeout was set.
+	if c.readTimeout > 0 {
+		err := conn.Conn.SetReadDeadline(time.Now().Add(c.readTimeout))
+		if err != nil {
+			return nil, err
+		}
+	}
 	// Read and parse response.
+	conn.newLineIdx, conn.parsedIdx, conn.resLenIdx = 0, 0, 0
+	conn.buff = conn.buff[:cap(conn.buff)]
 	var val interface{}
-	val, err = c.readResponse(conn)
+	val, err = conn.ReadValue()
 	if err != nil {
 		c.onConnError(conn, err)
 		return nil, err
@@ -173,7 +208,7 @@ func (c *Client) checkConn(conn *conn) (err error) {
 	// Chose db,becase redis default db is 0,so write command when db>0.
 	if c.dbIndex > 0 {
 		// "select x"
-		conn.WriteCmdCount(2)
+		conn.WriteCount(2)
 		conn.WriteString("select")
 		conn.WriteInt(int64(c.dbIndex))
 		_, err = conn.Conn.Write(conn.buff)
@@ -193,29 +228,4 @@ func (c *Client) onConnError(conn *conn, err error) {
 		conn.Conn = nil
 	}
 	c.putConn(conn)
-}
-
-// Write conn buffer to server.
-func (c *Client) writeRequest(conn *conn) (err error) {
-	// If c.writeTimeout was set.
-	if c.writeTimeout > 0 {
-		err = conn.Conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
-		if err != nil {
-			return
-		}
-	}
-	_, err = conn.Conn.Write(conn.buff)
-	return
-}
-
-// Read and parse result.
-func (c *Client) readResponse(conn *conn) (interface{}, error) {
-	// If c.readTimeout was set.
-	if c.readTimeout > 0 {
-		err := conn.Conn.SetReadDeadline(time.Now().Add(c.readTimeout))
-		if err != nil {
-			return nil, err
-		}
-	}
-	return conn.ReadValue()
 }
