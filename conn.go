@@ -165,10 +165,9 @@ func (c *conn) writeNil() {
 	c.buff = append(c.buff, endLine...)
 }
 
-// Write command args count into buffer.
+// Write integer into buffer.
 // Example: "set a 1" -> "*3\r\n..."
 func (c *conn) WriteCount(n int64) {
-	c.buff = c.buff[:0]
 	// '*'
 	c.buff = append(c.buff, '*')
 	// count
@@ -293,14 +292,16 @@ func (c *conn) readN(n int) ([]byte, error) {
 				c.buff = append(c.buff, make([]byte, m)...)
 			} else {
 				if c.newLineIdx >= m {
+					// c.newLineIndex + buffLeft >= dataLeft
 					// [...newLineIdx...resLenIdx] -> [newLineIdx...resLenIdx...]
 					c.resLenIdx = copy(c.buff, c.buff[c.newLineIdx:c.resLenIdx])
-					c.parsedIdx -= c.newLineIdx
-					c.newLineIdx = 0
 				} else {
 					// [...newLineIdx...resLenIdx] -> [...newLineIdx...resLenIdx...]
-					c.buff = append(c.buff, make([]byte, m)...)
+					newBuff := make([]byte, n)
+					c.resLenIdx = copy(newBuff, c.buff[c.newLineIdx:c.resLenIdx])
 				}
+				c.parsedIdx -= c.newLineIdx
+				c.newLineIdx = 0
 			}
 		}
 		// Read from net.Conn

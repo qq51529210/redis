@@ -110,8 +110,11 @@ func (c *Client) Close() error {
 }
 
 // Write command to server,and read response from server.
-// Example: Client.Cmd("set", "test", "ok").
-// Return value data type could be one of [nil, string, int64, []string].
+// Example: Client.Cmd("set", "a", 1).
+// Args data type:
+// 	int,float,string,[]byte -> string.
+//	struct,[]interface{} -> json.
+// Return value data type could be one of [nil, string, int64, []interface{}].
 // Return error could be network error or server error message.
 func (c *Client) Cmd(args ...interface{}) (interface{}, error) {
 	// Get free conn.
@@ -121,7 +124,7 @@ func (c *Client) Cmd(args ...interface{}) (interface{}, error) {
 		return nil, err
 	}
 	var value interface{}
-	value, err = c.writeCmd(conn, "select", c.dbIndex)
+	value, err = c.writeCmd(conn, args...)
 	if err != nil {
 		c.onConnError(conn, err)
 		return nil, err
@@ -192,6 +195,7 @@ func (c *Client) onConnError(conn *conn, err error) {
 }
 
 func (c *Client) writeCmd(conn *conn, args ...interface{}) (interface{}, error) {
+	conn.buff = conn.buff[:0]
 	// Step 1: write command count into buffer.
 	conn.WriteCount(int64(len(args)))
 	for _, a := range args {

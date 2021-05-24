@@ -35,34 +35,6 @@ func Test_Client(t *testing.T) {
 	if !ok || str != "OK" {
 		t.FailNow()
 	}
-	// set b 1.1
-	value, err = client.Cmd("set", "b", 1.1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	str, ok = value.(string)
-	if !ok || str != "OK" {
-		t.FailNow()
-	}
-	// set c cfg
-	value, err = client.Cmd("set", "c", cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	str, ok = value.(string)
-	if !ok || str != "OK" {
-		t.FailNow()
-	}
-	// set d []interface{}{1, "1", 1.1}
-	array := []interface{}{1, "2", 3.3}
-	value, err = client.Cmd("set", "d", array)
-	if err != nil {
-		t.Fatal(err)
-	}
-	str, ok = value.(string)
-	if !ok || str != "OK" {
-		t.FailNow()
-	}
 	// get a
 	value, err = client.Cmd("get", "a")
 	if err != nil {
@@ -72,6 +44,15 @@ func Test_Client(t *testing.T) {
 	if !ok || str != "1" {
 		t.FailNow()
 	}
+	// set b 1.1
+	value, err = client.Cmd("set", "b", 1.1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok = value.(string)
+	if !ok || str != "OK" {
+		t.FailNow()
+	}
 	// get b
 	value, err = client.Cmd("get", "b")
 	if err != nil {
@@ -79,6 +60,15 @@ func Test_Client(t *testing.T) {
 	}
 	str, ok = value.(string)
 	if !ok || str != "1.1" {
+		t.FailNow()
+	}
+	// set c cfg
+	value, err = client.Cmd("set", "c", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok = value.(string)
+	if !ok || str != "OK" {
 		t.FailNow()
 	}
 	// get c
@@ -101,34 +91,37 @@ func Test_Client(t *testing.T) {
 		newCfg.WriteTimeout != cfg.WriteTimeout {
 		t.FailNow()
 	}
-	// get d
-	value, err = client.Cmd("get", "b")
+	// rpush d
+	_, err = client.Cmd("del", "d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	array := []interface{}{1, "2", 3.3}
+	for _, a := range array {
+		value, err = client.Cmd("rpush", "d", a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok = value.(int64); !ok {
+			t.FailNow()
+		}
+	}
+	// lrange d
+	value, err = client.Cmd("lrange", "d", 0, len(array))
 	if err != nil {
 		t.Fatal(err)
 	}
 	newArray, ok := value.([]interface{})
-	if !ok {
+	if !ok || len(newArray) != len(array) {
 		t.FailNow()
 	}
-	if len(newArray) != len(array) {
-		t.FailNow()
-	}
-	if str, ok = newArray[0].(string); !ok || str != strconv.FormatInt(int64(array[0].(int)), 64) {
+	if str, ok = newArray[0].(string); !ok || str != strconv.FormatInt(int64(array[0].(int)), 10) {
 		t.FailNow()
 	}
 	if str, ok = newArray[1].(string); !ok || str != array[1].(string) {
 		t.FailNow()
 	}
-	if str, ok = newArray[1].(string); !ok || str != strconv.FormatInt(int64(array[0].(int)), 64) {
-		t.FailNow()
-	}
-
-	value, err = client.Cmd("lpush", "l", "1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	str, ok = value.(string)
-	if !ok || str != "OK" {
+	if str, ok = newArray[2].(string); !ok || str != strconv.FormatFloat(array[2].(float64), 'f', 1, 64) {
 		t.FailNow()
 	}
 }
