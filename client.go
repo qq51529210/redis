@@ -49,14 +49,6 @@ func NewClient(newConn func(string) (net.Conn, error), cfg *ClientConfig) *Clien
 	c := new(Client)
 	c.cond = sync.NewCond(new(sync.Mutex))
 	c.ok = true
-	// Function newConn
-	if newConn == nil {
-		c.newConn = func(host string) (net.Conn, error) {
-			return net.Dial("tcp", host)
-		}
-	} else {
-		c.newConn = newConn
-	}
 	// Host
 	c.host = cfg.Host
 	if c.host == "" {
@@ -81,6 +73,20 @@ func NewClient(newConn func(string) (net.Conn, error), cfg *ClientConfig) *Clien
 		c.connPool = make([]*conn, 1)
 	} else {
 		c.connPool = make([]*conn, cfg.MaxConn)
+	}
+	// Function newConn
+	if newConn == nil {
+		if c.readTimeout > 0 {
+			c.newConn = func(host string) (net.Conn, error) {
+				return net.DialTimeout("tcp", host, c.readTimeout)
+			}
+		} else {
+			c.newConn = func(host string) (net.Conn, error) {
+				return net.Dial("tcp", host)
+			}
+		}
+	} else {
+		c.newConn = newConn
 	}
 	// Init conn pool.
 	for i := 0; i < len(c.connPool); i++ {
