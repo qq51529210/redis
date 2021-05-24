@@ -18,44 +18,28 @@ client := redis.NewClient(nil, &ClientConfig{
   WriteTimeout: 3000,
 })
 
-// Command "set a 1",but integer 1 will convert to string "1".
+// Int convert to string "1".
 value, err := client.Cmd("set", "a", 1)
 checkError(err)
 
-// Float number also convert to string "1.1".
+// Float also convert to string "1.1".
 value, err := client.Cmd("set", "b", 1.1)
 checkError(err)
 
-// Set a struct,will convert to json string too.
+// Struct convert to json.
 value, err = client.Cmd("set", "c", &struct{})
 checkError(err)
 
-// Set array.
-value, err = client.Cmd("set", "d", []interface{}{1, "1", 1.1})
-checkError(err)
-
-// Command "get a",value is string "1" not integer 1!
+// Value is string "1".
 value, err = client.Cmd("get", "a")
 checkError(err)
 
-// Float number value is string "1.1" not float 1.1 too.
+// Value is string "1.1".
 value, err = client.Cmd("get", "b")
 checkError(err)
 
-// Command "get c",value is json string.
+// Value is json.
 value, err = client.Cmd("get", "c")
-checkError(err)
-
-// Command "get d",value is []interface{}{}
-value, err = client.Cmd("get", "d")
-checkError(err)
-
-// Command "get b",but key "b" doesn't existed,value is nil
-value, err = client.Cmd("get", "b")
-checkError(err)
-
-// Invalid command "gett a",err is server error message.
-value, err = client.Cmd("gett", "a")
 checkError(err)
 
 ```
