@@ -124,4 +124,12 @@ func Test_Client(t *testing.T) {
 	if str, ok = newArray[2].(string); !ok || str != strconv.FormatFloat(array[2].(float64), 'f', 1, 64) {
 		t.FailNow()
 	}
+	// get e
+	value, err = client.Cmd("get", "e")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value != nil {
+		t.FailNow()
+	}
 }
