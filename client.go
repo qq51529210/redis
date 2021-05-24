@@ -45,7 +45,7 @@ type ClientConfig struct {
 }
 
 // Create a redis command client. If arg newConn is nil,use net.Dial() instead.
-func NewClient(newConn func(string) (net.Conn, error), cfg *ClientConfig) *Client {
+func NewClient(dialFunc func(string) (net.Conn, error), cfg *ClientConfig) *Client {
 	c := new(Client)
 	c.cond = sync.NewCond(new(sync.Mutex))
 	c.ok = true
@@ -75,7 +75,7 @@ func NewClient(newConn func(string) (net.Conn, error), cfg *ClientConfig) *Clien
 		c.connPool = make([]*conn, cfg.MaxConn)
 	}
 	// Function newConn
-	if newConn == nil {
+	if dialFunc == nil {
 		if c.readTimeout > 0 {
 			c.newConn = func(host string) (net.Conn, error) {
 				return net.DialTimeout("tcp", host, c.readTimeout)
@@ -86,7 +86,7 @@ func NewClient(newConn func(string) (net.Conn, error), cfg *ClientConfig) *Clien
 			}
 		}
 	} else {
-		c.newConn = newConn
+		c.newConn = dialFunc
 	}
 	// Init conn pool.
 	for i := 0; i < len(c.connPool); i++ {
