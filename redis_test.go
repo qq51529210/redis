@@ -10,7 +10,7 @@ import (
 
 func Test_Client(t *testing.T) {
 	cfg := &ClientConfig{
-		Host:         "192.168.1.14:6379",
+		Host:         "127.0.0.1:6379",
 		DB:           1,
 		MaxConn:      10,
 		ReadTimeout:  0,

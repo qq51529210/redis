@@ -52,7 +52,7 @@ func NewClient(dialFunc func(string) (net.Conn, error), cfg *ClientConfig) *Clie
 	// Host
 	c.host = cfg.Host
 	if c.host == "" {
-		c.host = "localhost:6379"
+		c.host = "127.0.0.1:6379"
 	}
 	// DB
 	if cfg.DB > 0 {
