@@ -69,7 +69,7 @@ func NewClient(dialFunc func(string) (net.Conn, error), cfg *ClientConfig) *Clie
 	}
 	c.writeTimeout *= time.Millisecond
 	// MaxConn
-	if cfg.MaxConn < 0 {
+	if cfg.MaxConn < 1 {
 		c.connPool = make([]*conn, 1)
 	} else {
 		c.connPool = make([]*conn, cfg.MaxConn)
