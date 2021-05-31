@@ -266,7 +266,9 @@ func (c *conn) tryReadLine() ([]byte, bool) {
 	if c.resLenIdx == len(c.buff) {
 		if c.newLineIdx == 0 {
 			// [newLineIdx...resLenIdx] -> [newLineIdx...resLenIdx...]
-			c.buff = append(c.buff, make([]byte, len(c.buff)*2)...)
+			b := make([]byte, 2*len(c.buff))
+			copy(b, c.buff)
+			c.buff = b
 		} else {
 			// [...newLineIdx...resLenIdx] -> [newLineIdx...resLenIdx...]
 			c.resLenIdx = copy(c.buff, c.buff[c.newLineIdx:c.resLenIdx])
@@ -289,7 +291,9 @@ func (c *conn) readN(n int) ([]byte, error) {
 		if m > 0 {
 			if c.newLineIdx == 0 {
 				// [newLineIdx...resLenIdx] -> [newLineIdx...resLenIdx...n]
-				c.buff = append(c.buff, make([]byte, m)...)
+				newBuff := make([]byte, len(c.buff)+m)
+				copy(newBuff, c.buff)
+				c.buff = newBuff
 			} else {
 				if c.newLineIdx >= m {
 					// c.newLineIndex + buffLeft >= dataLeft
