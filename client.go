@@ -2,7 +2,10 @@ package redis
 
 import (
 	"errors"
+	"fmt"
 	"net"
+	"net/url"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -30,49 +33,67 @@ type Client struct {
 	connPool []*conn
 }
 
-// Init data for NewClient().
-type ClientConfig struct {
-	// Redis server listen address,it will pass to newConn().Default is "localhost:6379"
-	Host string `json:"host"`
-	// Index of db which every command whill choose.
-	DB int `json:"db"`
-	// Maximum connections.
-	MaxConn int `json:"maxConn"`
-	// IO read timeout,millisecond.
-	ReadTimeout int `json:"readTimeout"`
-	// IO write timeout,millisecond.
-	WriteTimeout int `json:"writeTimeout"`
-}
-
-// Create a redis command client. If arg newConn is nil,use net.Dial() instead.
-func NewClient(dialFunc func(string) (net.Conn, error), cfg *ClientConfig) *Client {
+// Create a redis command client.
+// If arg newConn is nil,use net.Dial() instead.
+// Url exmaple: redsi://127.0.0.1:6379?db=1&max_conn=10&read_timeout=3000&write_timeout=3000
+// Url query param db is use for every new connection exec command "select db".
+// Url query param max_conn is max connections to server.
+// Url query param read_timeout and write_timeout is connection's io timeout.
+func NewClient(dialFunc func(string) (net.Conn, error), serUrl string) (*Client, error) {
 	c := new(Client)
 	c.cond = sync.NewCond(new(sync.Mutex))
 	c.ok = true
+	//
+	_url, err := url.Parse(serUrl)
+	if err != nil {
+		return nil, err
+	}
 	// Host
-	c.host = cfg.Host
+	c.host = _url.Host
 	if c.host == "" {
 		c.host = "127.0.0.1:6379"
 	}
+	query := _url.Query()
+	parseInt := func(name string) (int, error) {
+		str := query.Get(name)
+		if str != "" {
+			n, err := strconv.ParseInt(str, 10, 64)
+			if err != nil {
+				return 0, fmt.Errorf("parse query param %s %v", name, err.Error())
+			}
+			if n < 0 {
+				return 0, fmt.Errorf("invalid query param %s %d", name, n)
+			}
+		}
+		return 0, nil
+	}
 	// DB
-	if cfg.DB > 0 {
-		c.dbIndex = cfg.DB
+	c.dbIndex, err = parseInt("db")
+	if err != nil {
+		return nil, err
 	}
+	var n int
 	// ReadTimeout
-	if cfg.ReadTimeout > 0 {
-		c.readTimeout = time.Duration(cfg.ReadTimeout)
+	n, err = parseInt("read_timeout")
+	if err != nil {
+		return nil, err
 	}
-	c.readTimeout *= time.Millisecond
+	c.readTimeout = time.Duration(n) * time.Millisecond
 	// WriteTimeout
-	if cfg.WriteTimeout > 0 {
-		c.writeTimeout = time.Duration(cfg.WriteTimeout)
+	n, err = parseInt("write_timeout")
+	if err != nil {
+		return nil, err
 	}
-	c.writeTimeout *= time.Millisecond
+	c.writeTimeout = time.Duration(n) * time.Millisecond
 	// MaxConn
-	if cfg.MaxConn < 1 {
+	n, err = parseInt("max_conn")
+	if err != nil {
+		return nil, err
+	}
+	if n < 1 {
 		c.connPool = make([]*conn, 1)
 	} else {
-		c.connPool = make([]*conn, cfg.MaxConn)
+		c.connPool = make([]*conn, n)
 	}
 	// Function newConn
 	if dialFunc == nil {
@@ -93,7 +114,13 @@ func NewClient(dialFunc func(string) (net.Conn, error), cfg *ClientConfig) *Clie
 		c.connPool[i] = new(conn)
 		c.connPool[i].free = true
 	}
-	return c
+	// Test host.
+	_, err = c.Cmd("ping")
+	if err != nil {
+		c.Close()
+		return nil, err
+	}
+	return c, nil
 }
 
 // Close this client,and all net.Conn.

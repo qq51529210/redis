@@ -9,20 +9,15 @@ import (
 )
 
 func Test_Client(t *testing.T) {
-	cfg := &ClientConfig{
-		Host:         "127.0.0.1:6379",
-		DB:           1,
-		MaxConn:      10,
-		ReadTimeout:  0,
-		WriteTimeout: 0,
-	}
 	// Create a new Client
-	client := NewClient(func(address string) (net.Conn, error) {
+	client, err := NewClient(func(address string) (net.Conn, error) {
 		return net.DialTimeout("tcp", address, time.Second)
-	}, cfg)
+	}, "redsi://127.0.0.1:6379?db=1")
+	if err != nil {
+		t.Fatal(err)
+	}
 	var (
 		value interface{}
-		err   error
 		str   string
 		ok    bool
 	)
@@ -63,7 +58,17 @@ func Test_Client(t *testing.T) {
 		t.FailNow()
 	}
 	// set c cfg
-	value, err = client.Cmd("set", "c", cfg)
+	type testStruct struct {
+		A int     `json:"a"`
+		B float64 `json:"b"`
+		C string  `json:"c"`
+	}
+	ts1 := testStruct{
+		A: 100,
+		B: 2.23,
+		C: "test",
+	}
+	value, err = client.Cmd("set", "c", ts1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,15 +85,12 @@ func Test_Client(t *testing.T) {
 	if !ok {
 		t.FailNow()
 	}
-	var newCfg ClientConfig
-	err = json.Unmarshal([]byte(str), &newCfg)
+	var ts2 testStruct
+	err = json.Unmarshal([]byte(str), &ts2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if newCfg.Host != cfg.Host ||
-		newCfg.DB != cfg.DB ||
-		newCfg.ReadTimeout != cfg.ReadTimeout ||
-		newCfg.WriteTimeout != cfg.WriteTimeout {
+	if ts2.A != ts1.A || ts2.B != ts1.B || ts2.C != ts1.C {
 		t.FailNow()
 	}
 	// rpush d
